@@ -1,0 +1,9 @@
+
+guest.bin:     file format elf32-i386
+
+
+Disassembly of section .text:
+
+00000000 <_start>:
+   0:	b8 00 00 00 00       	mov    eax,0x0
+   5:	c3                   	ret    
