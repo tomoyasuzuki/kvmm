@@ -9,8 +9,8 @@
 #include <stdint.h>
 #include <linux/kvm.h>
 
-
-#define GUEST_PATH "guest.bin"
+#define CODE_START 0x1000
+#define GUEST_PATH "bootblock"
 
 struct vm {
     int vm_fd;
@@ -24,7 +24,6 @@ struct vcpu {
     struct kvm_sregs sregs;
     struct kvm_regs regs;
 };
-
 
 void init_vcpu(struct vm *vm, struct vcpu *vcpu) {
     int vcpu_mmap_size;
@@ -48,8 +47,6 @@ void init_vcpu(struct vm *vm, struct vcpu *vcpu) {
         exit(1);
     }
 }
-
-#define CODE_START 0x1000
 
 void set_sregs(struct kvm_sregs *sregs) {
     sregs->cs.selector = CODE_START;
@@ -110,21 +107,20 @@ void load_guest_binary(void *dst) {
     while(1) {
         ret = read(biosfd, tmp, 4096);
         if (ret <= 0) break;
-        printf("reg %d", ret);
 
         printf("read size: %d\n", ret);
         tmp += ret;
     }
 }
 
-void set_user_memory_region(void **mem, int vmfd, 
+void set_user_memory_region(struct vm *vm, 
         struct kvm_userspace_memory_region *memreg) {
-    // *mem = mmap(NULL, 0x200000, PROT_READ | PROT_WRITE,
-	//         MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    //vm->mem = mmap(NULL, 0x200000, PROT_READ | PROT_WRITE,
+	//       MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     size_t guest_memory_size = 0x200000;
     size_t alignment_size = 0x1000;
 
-    int result = posix_memalign(&(mem), 
+    int result = posix_memalign(&(vm->mem), 
             alignment_size, 
             guest_memory_size);
 
@@ -137,9 +133,9 @@ void set_user_memory_region(void **mem, int vmfd,
 	memreg->flags = 0;
 	memreg->guest_phys_addr = 0;
 	memreg->memory_size = (__u64)guest_memory_size;
-	memreg->userspace_addr = (unsigned long)*mem;
+	memreg->userspace_addr = (unsigned long)vm->mem;
     
-    if (ioctl(vmfd, KVM_SET_USER_MEMORY_REGION, memreg) < 0) {
+    if (ioctl(vm->fd, KVM_SET_USER_MEMORY_REGION, memreg) < 0) {
 		perror("KVM_SET_USER_MEMORY_REGION");
         exit(1);
 	}
@@ -148,7 +144,7 @@ void set_user_memory_region(void **mem, int vmfd,
 int main(int argc, char **argv) {
     struct vm *vm = (struct vm*)malloc(sizeof(struct vm));
     struct vcpu *vcpu = (struct vcpu*)malloc(sizeof(struct vcpu));
-    struct kvm_userspace_memory_region memreg;
+    struct kvm_userspace_memory_region *memreg = (struct kvm_userspace_memory_region*)malloc(sizeof(struct kvm_userspace_memory_region));
 
     vm->vm_fd = open("/dev/kvm", O_RDWR);
     if (vm->vm_fd < 0) { 
@@ -174,7 +170,7 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    set_user_memory_region(&vm->mem, vm->fd, &memreg);
+    set_user_memory_region(vm, memreg);
     
     load_guest_binary(vm->mem);
 
@@ -196,7 +192,7 @@ int main(int argc, char **argv) {
             case KVM_EXIT_IO:
                 goto check;
             default:
-                printf("exit reason: \n", vcpu->kvm_run->exit_reason);
+                printf("exit reason: %d\n", vcpu->kvm_run->exit_reason);
                 exit(1);
         }
 
