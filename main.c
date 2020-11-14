@@ -42,6 +42,8 @@
 #define CR4_SMEP (1U << 20)
 #define CR4_SMAP (1U << 21)
 
+#define GUEST_PATH "guest.bin"
+
 
 struct vm {
     int vm_fd;
@@ -134,7 +136,7 @@ void set_regs(struct vcpu *vcpu) {
     vcpu->regs.rflags = 0x0000000000000002ULL;
     vcpu->regs.rip = 0;
     vcpu->regs.rsp = 0xffffffff;
-    vcpu->regs.rbp = 0;
+    vcpu->regs.rbp = 0x000e0000;
 
     if (ioctl(vcpu->fd, KVM_SET_REGS, &(vcpu->regs)) < 0) {
         perror("KVM_SET_REGS");
@@ -147,6 +149,48 @@ void set_irqchip(struct vm *vm) {
         perror("KVM_CREATE_IRQCHIP");
         exit(1);
     }
+}
+
+void load_guest_binary(void *dst) {
+    int biosfd = open(GUEST_PATH, O_RDONLY);
+    if (biosfd < 0) {
+        perror("open fail");
+        exit(1);
+    }
+
+    int ret = 0;
+    char *tmp = (char*)dst; 
+    while(1) {
+        ret = read(biosfd, tmp, 4096);
+        if (ret <= 0) break;
+        printf("reg %d", ret);
+
+        printf("read size: %d\n", ret);
+        tmp += ret;
+    }
+}
+
+void set_user_memory_region(void **mem, int vmfd, 
+        struct kvm_userspace_memory_region *memreg) {
+    *mem = mmap(NULL, 0x200000, PROT_READ | PROT_WRITE,
+	        MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    //int mem = posix_memalign(&(mem), (size_t)4096, (size_t)0x200000);
+    //printf("posix_memalign: %d\n", mem);
+    if (*mem == (void*)(-1)) {
+        perror("mmap mem");
+        exit(1);
+    }
+
+    memreg->slot = 0;
+	memreg->flags = 0;
+	memreg->guest_phys_addr = 0;
+	memreg->memory_size = 0x200000;
+	memreg->userspace_addr = (unsigned long)*mem;
+    
+    if (ioctl(vmfd, KVM_SET_USER_MEMORY_REGION, memreg) < 0) {
+		perror("KVM_SET_USER_MEMORY_REGION");
+        exit(1);
+	}
 }
 
 int main(int argc, char **argv) {
@@ -164,50 +208,23 @@ int main(int argc, char **argv) {
     if (vm->fd < 0) {
         perror("KVM_CREATE_VM");
         exit(1);
-    } 
+    }
 
-    set_irqchip(vm);
-    ioctl(vm->fd, KVM_CREATE_PIT);
+    //set_irqchip(vm);
+
+    if (ioctl(vm->fd, KVM_CREATE_PIT) < 0) {
+        perror("KVM_CREATE_PIT");
+        exit(1);
+    }
 
     if (ioctl(vm->fd, KVM_SET_TSS_ADDR, 0xfffbd000) < 0) {
         perror("KVM_SET_TSS_ADDR");
         exit(1);
     }
 
-    vm->mem = mmap(NULL, 0x200000, PROT_READ | PROT_WRITE,
-		   MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-    if (vm->mem == (void*)(-1)) {
-        perror("mmap mem");
-        exit(1);
-    }
-
-    memreg.slot = 0;
-	memreg.flags = 0;
-	memreg.guest_phys_addr = 0;
-	memreg.memory_size = 0x200000;
-	memreg.userspace_addr = (unsigned long)vm->mem;
+    set_user_memory_region(&vm->mem, vm->fd, &memreg);
     
-    if (ioctl(vm->fd, KVM_SET_USER_MEMORY_REGION, &memreg) < 0) {
-		perror("KVM_SET_USER_MEMORY_REGION");
-        exit(1);
-	}
-
-    int guestfd = open("guest.bin", O_RDONLY);
-
-    if (guestfd < 0) {
-        perror("open guest binary");
-        exit(1);
-    }
-
-    int ret = 0;
-    char *tmp = (char*)vm->mem; 
-    while(1) {
-        ret = read(guestfd, tmp, 4096);
-        if (ret <= 0) break;
-
-        printf("read size: %d\n", ret);
-        tmp += ret;
-    }
+    load_guest_binary(vm->mem);
 
     init_vcpu(vm, vcpu);
     set_regs(vcpu);
