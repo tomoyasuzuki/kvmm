@@ -72,16 +72,17 @@ seta20.2:
   # Complete the transition to 32-bit protected mode by using a long jmp
   # to reload %cs and %eip.  The segment descriptors are set up with no
   # translation, so that the mapping is still the identity mapping.
-  ljmp    $(SEG_KCODE<<3), $start32
+  ljmp    $(1<<3), $start32
     7c2c:	ea                   	.byte 0xea
     7c2d:	31 7c 08 00          	xor    %edi,0x0(%eax,%ecx,1)
 
 00007c31 <start32>:
+  
 
 .code32  # Tell assembler to generate 32-bit code now.
 start32:
   # Set up the protected-mode data segment registers
-  movw    $(SEG_KDATA<<3), %ax    # Our data segment selector
+  movw    $(2<<3), %ax    # Our data segment selector
     7c31:	66 b8 10 00          	mov    $0x10,%ax
   movw    %ax, %ds                # -> DS: Data Segment
     7c35:	8e d8                	mov    %eax,%ds
