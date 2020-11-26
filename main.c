@@ -10,7 +10,7 @@
 #include <linux/kvm.h>
 
 #define CODE_START 0
-#define GUEST_PATH "bootblock"
+#define GUEST_PATH "../xv6/xv6.img"
 
 #define CR0_PE 1u
 #define CR0_MP (1U << 1)
@@ -148,7 +148,7 @@ void set_irqchip(struct vm *vm) {
 }
 
 void load_guest_binary(void *dst) {
-    int biosfd = open(GUEST_PATH, O_RDONLY);
+    int biosfd = open("../xv6/bootblock", O_RDONLY);
     if (biosfd < 0) {
         perror("open fail");
         exit(1);
@@ -179,7 +179,7 @@ void set_user_memory_region(struct vm *vm,
         struct kvm_userspace_memory_region *memreg) {
     // vm->mem = mmap(NULL, 0x200000, PROT_READ | PROT_WRITE,
 	//        MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-    size_t guest_memory_size = 0xffffffff;
+    size_t guest_memory_size = 0x20000000;
     size_t alignment_size = 0x1000;
 
     int result = posix_memalign(&(vm->mem), 
@@ -194,7 +194,7 @@ void set_user_memory_region(struct vm *vm,
     memreg->slot = 1;
 	memreg->flags = 0;
 	memreg->guest_phys_addr = 0;
-    memreg->memory_size = 0x200000;
+    memreg->memory_size = (unsigned long long)0x20000000;
 	//memreg->memory_size = (__u64)guest_memory_size;
 	memreg->userspace_addr = (unsigned long)vm->mem;
     
@@ -263,7 +263,7 @@ void handle_io_out(struct blk *blk, int port, char value, __u16 val) {
         if (value == 0x20) {
             uint32_t i = 0 | blk->lba_low_reg | (blk->lba_middle_reg << 8) | (blk->lba_high_reg << 16) |
                           ((blk->drive_head_reg & 0x0F) << 24);
-            printf("i: %d\n", i);
+            //printf("i: %d\n", i);
             blk->index = i * 512;
             break;
         }
@@ -359,10 +359,12 @@ int main(int argc, char **argv) {
                 for (int i = 0; i < vcpu->kvm_run->io.count; i++) {
                     
                     //printf("out: %u\n", port);
-                    //print_regs(vcpu);
+                    print_regs(vcpu);
 
                     char value = *(unsigned char *)((unsigned char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
                     __u16 val = *(__u16 *)((__u16 *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
+                    ioctl(vcpu->fd, KVM_GET_REGS, &(vcpu->regs));
+                    //print_regs(vcpu);
                     handle_io_out(blk, port, value, val);
 		        }
             } else {
@@ -381,8 +383,6 @@ int main(int argc, char **argv) {
                         }
                         // 7f 0001111111
                         // 45 000000000001000101
-
-                        printf("d: 0x%x\n", d);
                         //break;
                         // 46 4c 45 7f = 01000110010011000100010101111111 
 
@@ -406,7 +406,7 @@ int main(int argc, char **argv) {
             if (vcpu->kvm_run->mmio.is_write) {
                 printf("is write\n");
             }
-            break;
+            exit(1);
         } else {
             print_regs(vcpu);
             printf("exit reason: %d\n", vcpu->kvm_run->exit_reason);
