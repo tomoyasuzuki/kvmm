@@ -298,7 +298,7 @@ readseg(uchar* pa, uint count, uint offset)
     7d46:	68 00 10 00 00       	push   $0x1000
     7d4b:	68 00 00 01 00       	push   $0x10000
     7d50:	e8 a3 ff ff ff       	call   7cf8 <readseg>
-  if(elf->magic != ELF_MAGIC)
+  if(elf->magic != ELF_MAGIC) {
     7d55:	83 c4 0c             	add    $0xc,%esp
     7d58:	81 3d 00 00 01 00 7f 	cmpl   $0x464c457f,0x10000
     7d5f:	45 4c 46 

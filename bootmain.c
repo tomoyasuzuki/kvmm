@@ -28,8 +28,10 @@ bootmain(void)
   readseg((uchar*)elf, 4096, 0);
 
   // Is this an ELF executable?
-  if(elf->magic != ELF_MAGIC)
-    return;  // let bootasm.S handle error
+  if(elf->magic != ELF_MAGIC) {
+    return;
+  }
+  //return;  // let bootasm.S handle error
 
   // Load each program segment (ignores ph flags).
   ph = (struct proghdr*)((uchar*)elf + elf->phoff);
