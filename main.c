@@ -126,7 +126,7 @@ void set_regs(struct vcpu *vcpu) {
     }
 
     vcpu->regs.rflags = 0x0000000000000002ULL;
-    vcpu->regs.rip = 0xfffe0000;
+    vcpu->regs.rip = 0x7c00;
 
     if (ioctl(vcpu->fd, KVM_SET_REGS, &(vcpu->regs)) < 0) {
         perror("KVM_SET_REGS");
@@ -151,7 +151,6 @@ void load_bios(void *dst) {
 }
 
 void load_guest_binary(void *dst) {
-    //int biosfd = open("../xv6/bootblock", O_RDONLY);
     int biosfd = open("../xv6/bootblock", O_RDONLY);
     
     if (biosfd < 0) {
@@ -172,7 +171,7 @@ void load_guest_binary(void *dst) {
 
 void set_user_memory_region(struct vm *vm, 
         struct kvm_userspace_memory_region *memreg) {
-    size_t guest_memory_size = 0xFFFF0000;
+    size_t guest_memory_size = 0x80000000;
     size_t alignment_size = 0x1000;
 
     int result = posix_memalign(&(vm->mem), 
@@ -184,7 +183,7 @@ void set_user_memory_region(struct vm *vm,
         exit(1);
     }
 
-    memreg->slot = 1;
+    memreg->slot = 0;
 	memreg->flags = 0;
 	memreg->guest_phys_addr = 0;
 	memreg->memory_size = (__u64)guest_memory_size;
@@ -271,82 +270,10 @@ void handle_io_out(struct blk *blk, int port, char value, __u16 val) {
     }
 }
 
-void alloc_bios_memory(struct vm *vm) {
-    uint64_t bios_mem_size = (1024 * 128);
-    uint64_t bios_ram1_addr = 0x00000000;
-    uint64_t bios_ram1_size = (1024 * 640);
-    uint64_t bios_ram2_addr = 0x000C0000;
-    uint64_t bios_ram2_size = (1024 * 128);
-
-    /*  allocate bios rom */
-    int result = posix_memalign(&(vm->mem), 
-            0x1000, 
-            bios_mem_size);
-    if (result < 0) {
-        perror("POSIX_MEMALIGN");
-        exit(1);
-    }
-
-    /*  set bios rom */
-    kvm_mem *mem = (kvm_mem*)malloc(sizeof(kvm_mem));
-    mem->slot = 1;
-	mem->flags = 0;
-	mem->guest_phys_addr = 0xfffe0000;
-	mem->memory_size = (1024 * 128);
-	mem->userspace_addr = (unsigned long)vm->mem;
-    if (ioctl(vm->fd, KVM_SET_USER_MEMORY_REGION, mem)) {
-        perror("SET_BIOS_MEMORY");
-        exit(1);
-    }
-
-    // /* set bios ram */
-    void *ram1;
-    int ram1_result = posix_memalign(&(ram1),
-                        0x1000,
-                        bios_ram1_size);
-    if (result < 0) {
-        perror("ALLOC_RAM1_MEMORY");
-        exit(1);
-    }
-    
-    kvm_mem ram1mem;
-    ram1mem.slot = 0;
-    ram1mem.flags = 0;
-    ram1mem.memory_size = bios_ram1_size;
-    ram1mem.guest_phys_addr = bios_ram1_addr;
-    ram1mem.userspace_addr = (uint64_t)ram1;
-
-    if (ioctl(vm->fd, KVM_SET_USER_MEMORY_REGION, &ram1mem)) {
-        perror("SET_RAM1_MEM");
-        exit(1);
-    }
-
-    void *ram2;
-    int ram2_result = posix_memalign(&(ram2),
-                        0x1000,
-                        bios_ram2_size);
-    if (result < 0) {
-        perror("ALLOC_RAM1_MEMORY");
-        exit(1);
-    }
-    
-    kvm_mem ram2mem;
-    ram2mem.slot = 0;
-    ram2mem.flags = 0;
-    ram2mem.memory_size = bios_ram2_size;
-    ram2mem.guest_phys_addr = bios_ram2_addr;
-    ram2mem.userspace_addr = (uint64_t)ram2;
-
-    if (ioctl(vm->fd, KVM_SET_USER_MEMORY_REGION, ram2mem)) {
-        perror("SET_RAM2_MEM");
-        exit(1);
-    }
-}
-
 int main(int argc, char **argv) {
     struct vm *vm = (struct vm*)malloc(sizeof(struct vm));
     struct vcpu *vcpu = (struct vcpu*)malloc(sizeof(struct vcpu));
-    //struct kvm_userspace_memory_region *memreg = (struct kvm_userspace_memory_region*)malloc(sizeof(struct kvm_userspace_memory_region));
+    struct kvm_userspace_memory_region *memreg = (struct kvm_userspace_memory_region*)malloc(sizeof(struct kvm_userspace_memory_region));
     struct blk *blk = (struct blk*)malloc(sizeof(struct blk));
 
     vm->vm_fd = open("/dev/kvm", O_RDWR);
@@ -368,16 +295,14 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    // if (ioctl(vm->fd, KVM_SET_TSS_ADDR, 0xfffbd000) < 0) {
-    //     perror("KVM_SET_TSS_ADDR");
-    //     exit(1);
-    // }
+    if (ioctl(vm->fd, KVM_SET_TSS_ADDR, 0xfffbd000) < 0) {
+        perror("KVM_SET_TSS_ADDR");
+        exit(1);
+    }
 
-    //set_user_memory_region(vm, memreg);
-    alloc_bios_memory(vm);    
+    set_user_memory_region(vm, memreg);    
 
-    //load_guest_binary(vm->mem);
-    load_bios(vm->mem);
+    load_guest_binary(vm->mem);
 
     init_vcpu(vm, vcpu);
     set_regs(vcpu);
