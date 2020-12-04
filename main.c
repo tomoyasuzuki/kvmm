@@ -12,58 +12,7 @@
 #define CODE_START 0
 #define GUEST_PATH "../xv6/xv6.img"
 
-#define CR0_PE 1u
-#define CR0_MP (1U << 1)
-#define CR0_EM (1U << 2)
-#define CR0_TS (1U << 3)
-#define CR0_ET (1U << 4)
-#define CR0_NE (1U << 5)
-#define CR0_WP (1U << 16)
-#define CR0_AM (1U << 18)
-#define CR0_NW (1U << 29)
-#define CR0_CD (1U << 30)
-#define CR0_PG (1U << 31)
-
-/* CR4 bits */
-#define CR4_VME 1
-#define CR4_PVI (1U << 1)
-#define CR4_TSD (1U << 2)
-#define CR4_DE (1U << 3)
-#define CR4_PSE (1U << 4)
-#define CR4_PAE (1U << 5)
-#define CR4_MCE (1U << 6)
-#define CR4_PGE (1U << 7)
-#define CR4_PCE (1U << 8)
-#define CR4_OSFXSR (1U << 8)
-#define CR4_OSXMMEXCPT (1U << 10)
-#define CR4_UMIP (1U << 11)
-#define CR4_VMXE (1U << 13)
-#define CR4_SMXE (1U << 14)
-#define CR4_FSGSBASE (1U << 16)
-#define CR4_PCIDE (1U << 17)
-#define CR4_OSXSAVE (1U << 18)
-#define CR4_SMEP (1U << 20)
-#define CR4_SMAP (1U << 21)
-
-#define EFER_SCE 1
-#define EFER_LME (1U << 8)
-#define EFER_LMA (1U << 10)
-#define EFER_NXE (1U << 11)
-
-/* 32-bit page directory entry bits */
-#define PDE32_PRESENT 1
-#define PDE32_RW (1U << 1)
-#define PDE32_USER (1U << 2)
-#define PDE32_PS (1U << 7)
-
-/* 64-bit page * entry bits */
-#define PDE64_PRESENT 1
-#define PDE64_RW (1U << 1)
-#define PDE64_USER (1U << 2)
-#define PDE64_ACCESSED (1U << 5)
-#define PDE64_DIRTY (1U << 6)
-#define PDE64_PS (1U << 7)
-#define PDE64_G (1U << 8)
+typedef struct kvm_userspace_memory_region kvm_mem;
 
 struct vm {
     int vm_fd;
@@ -88,6 +37,51 @@ struct blk {
     uint8_t drive_head_reg;
     uint8_t status_command_reg;
     uint32_t index;
+};
+
+struct mp {             // floating pointer
+  unsigned char signature[4];           // "_MP_"
+  void *physaddr;               // phys addr of MP config table
+  unsigned char length;                 // 1
+  unsigned char specrev;                // [14]
+  unsigned char checksum;               // all bytes must add up to 0
+  unsigned char type;                   // MP system config type
+  unsigned char imcrp;
+  unsigned char reserved[3];
+};
+
+struct mpconf {         // configuration table header
+  unsigned char signature[4];           // "PCMP"
+  unsigned short length;                // total table length
+  unsigned char version;                // [14]
+  unsigned char checksum;               // all bytes must add up to 0
+  unsigned char product[20];            // product id
+  unsigned int *oemtable;               // OEM table pointer
+  unsigned short oemlength;             // OEM table length
+  unsigned short entry;                 // entry count
+  unsigned int *lapicaddr;              // address of local APIC
+  unsigned short xlength;               // extended table length
+  unsigned char xchecksum;              // extended table checksum
+  unsigned char reserved;
+};
+
+struct mpproc {         // processor table entry
+  unsigned char type;                   // entry type (0)
+  unsigned char apicid;                 // local APIC id
+  unsigned char version;                // local APIC verison
+  unsigned char flags;                  // CPU flags
+    #define MPBOOT 0x02           // This proc is the bootstrap processor.
+  unsigned char signature[4];           // CPU signature
+  unsigned int feature;                 // feature flags from CPUID instruction
+  unsigned char reserved[8];
+};
+
+struct mpioapic {       // I/O APIC table entry
+  unsigned char type;                   // entry type (2)
+  unsigned char apicno;                 // I/O APIC id
+  unsigned char version;                // I/O APIC version
+  unsigned char flags;                  // I/O APIC flags
+  unsigned int *addr;                  // I/O APIC address
 };
 
 void init_vcpu(struct vm *vm, struct vcpu *vcpu) {
@@ -132,7 +126,7 @@ void set_regs(struct vcpu *vcpu) {
     }
 
     vcpu->regs.rflags = 0x0000000000000002ULL;
-    vcpu->regs.rip = 0x7c00;
+    vcpu->regs.rip = 0xfffe0000;
 
     if (ioctl(vcpu->fd, KVM_SET_REGS, &(vcpu->regs)) < 0) {
         perror("KVM_SET_REGS");
@@ -147,8 +141,19 @@ void set_irqchip(struct vm *vm) {
     }
 }
 
+void load_bios(void *dst) {
+    int biosfd = open("../seabios/out/bios.bin", O_RDONLY);
+
+    int ret = 0;
+    char *tmp = (char*)dst;
+    ret = read(biosfd, tmp, 1024 * 128);
+    printf("size: %d\n", ret);
+}
+
 void load_guest_binary(void *dst) {
+    //int biosfd = open("../xv6/bootblock", O_RDONLY);
     int biosfd = open("../xv6/bootblock", O_RDONLY);
+    
     if (biosfd < 0) {
         perror("open fail");
         exit(1);
@@ -163,23 +168,11 @@ void load_guest_binary(void *dst) {
         printf("read size: %d\n", ret);
         tmp += ret;
     }
-    // ret = 0;
-    // tmp = (char*)dst;
-    // int kernel = open("../xv6/kernel", O_RDONLY);
-    // while(1) {
-    //     ret = read(kernel, tmp + 0x10000, 4096 * 128);
-    //     if (ret <= 0) break;
-
-    //     printf("read kernel: %d\n", ret);
-    //     tmp += ret;
-    // }
 }
 
 void set_user_memory_region(struct vm *vm, 
         struct kvm_userspace_memory_region *memreg) {
-    // vm->mem = mmap(NULL, 0x200000, PROT_READ | PROT_WRITE,
-	//        MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-    size_t guest_memory_size = 0x20000000;
+    size_t guest_memory_size = 0xFFFF0000;
     size_t alignment_size = 0x1000;
 
     int result = posix_memalign(&(vm->mem), 
@@ -194,8 +187,7 @@ void set_user_memory_region(struct vm *vm,
     memreg->slot = 1;
 	memreg->flags = 0;
 	memreg->guest_phys_addr = 0;
-    memreg->memory_size = (unsigned long long)0x20000000;
-	//memreg->memory_size = (__u64)guest_memory_size;
+	memreg->memory_size = (__u64)guest_memory_size;
 	memreg->userspace_addr = (unsigned long)vm->mem;
     
     if (ioctl(vm->fd, KVM_SET_USER_MEMORY_REGION, memreg) < 0) {
@@ -221,7 +213,7 @@ void set_blk(struct blk *blk) {
     blk->status_command_reg = 0x40;
 
 
-    int blk_img_fd = open("xv6.img", O_RDONLY);
+    int blk_img_fd = open("../xv6/xv6.img", O_RDONLY);
     if (blk_img_fd < 0) {
         perror("fail open xv6.img");
         exit(1);
@@ -279,10 +271,82 @@ void handle_io_out(struct blk *blk, int port, char value, __u16 val) {
     }
 }
 
+void alloc_bios_memory(struct vm *vm) {
+    uint64_t bios_mem_size = (1024 * 128);
+    uint64_t bios_ram1_addr = 0x00000000;
+    uint64_t bios_ram1_size = (1024 * 640);
+    uint64_t bios_ram2_addr = 0x000C0000;
+    uint64_t bios_ram2_size = (1024 * 128);
+
+    /*  allocate bios rom */
+    int result = posix_memalign(&(vm->mem), 
+            0x1000, 
+            bios_mem_size);
+    if (result < 0) {
+        perror("POSIX_MEMALIGN");
+        exit(1);
+    }
+
+    /*  set bios rom */
+    kvm_mem *mem = (kvm_mem*)malloc(sizeof(kvm_mem));
+    mem->slot = 1;
+	mem->flags = 0;
+	mem->guest_phys_addr = 0xfffe0000;
+	mem->memory_size = (1024 * 128);
+	mem->userspace_addr = (unsigned long)vm->mem;
+    if (ioctl(vm->fd, KVM_SET_USER_MEMORY_REGION, mem)) {
+        perror("SET_BIOS_MEMORY");
+        exit(1);
+    }
+
+    // /* set bios ram */
+    void *ram1;
+    int ram1_result = posix_memalign(&(ram1),
+                        0x1000,
+                        bios_ram1_size);
+    if (result < 0) {
+        perror("ALLOC_RAM1_MEMORY");
+        exit(1);
+    }
+    
+    kvm_mem ram1mem;
+    ram1mem.slot = 0;
+    ram1mem.flags = 0;
+    ram1mem.memory_size = bios_ram1_size;
+    ram1mem.guest_phys_addr = bios_ram1_addr;
+    ram1mem.userspace_addr = (uint64_t)ram1;
+
+    if (ioctl(vm->fd, KVM_SET_USER_MEMORY_REGION, &ram1mem)) {
+        perror("SET_RAM1_MEM");
+        exit(1);
+    }
+
+    void *ram2;
+    int ram2_result = posix_memalign(&(ram2),
+                        0x1000,
+                        bios_ram2_size);
+    if (result < 0) {
+        perror("ALLOC_RAM1_MEMORY");
+        exit(1);
+    }
+    
+    kvm_mem ram2mem;
+    ram2mem.slot = 0;
+    ram2mem.flags = 0;
+    ram2mem.memory_size = bios_ram2_size;
+    ram2mem.guest_phys_addr = bios_ram2_addr;
+    ram2mem.userspace_addr = (uint64_t)ram2;
+
+    if (ioctl(vm->fd, KVM_SET_USER_MEMORY_REGION, ram2mem)) {
+        perror("SET_RAM2_MEM");
+        exit(1);
+    }
+}
+
 int main(int argc, char **argv) {
     struct vm *vm = (struct vm*)malloc(sizeof(struct vm));
     struct vcpu *vcpu = (struct vcpu*)malloc(sizeof(struct vcpu));
-    struct kvm_userspace_memory_region *memreg = (struct kvm_userspace_memory_region*)malloc(sizeof(struct kvm_userspace_memory_region));
+    //struct kvm_userspace_memory_region *memreg = (struct kvm_userspace_memory_region*)malloc(sizeof(struct kvm_userspace_memory_region));
     struct blk *blk = (struct blk*)malloc(sizeof(struct blk));
 
     vm->vm_fd = open("/dev/kvm", O_RDWR);
@@ -304,14 +368,16 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    if (ioctl(vm->fd, KVM_SET_TSS_ADDR, 0xfffbd000) < 0) {
-        perror("KVM_SET_TSS_ADDR");
-        exit(1);
-    }
+    // if (ioctl(vm->fd, KVM_SET_TSS_ADDR, 0xfffbd000) < 0) {
+    //     perror("KVM_SET_TSS_ADDR");
+    //     exit(1);
+    // }
 
-    set_user_memory_region(vm, memreg);
-    
-    load_guest_binary(vm->mem);
+    //set_user_memory_region(vm, memreg);
+    alloc_bios_memory(vm);    
+
+    //load_guest_binary(vm->mem);
+    load_bios(vm->mem);
 
     init_vcpu(vm, vcpu);
     set_regs(vcpu);
@@ -327,7 +393,7 @@ int main(int argc, char **argv) {
     blk->sec_count_reg = 0;
     blk->status_command_reg = 0x40;
 
-    int blk_img_fd = open("xv6.img", O_RDONLY);
+    int blk_img_fd = open("../xv6/xv6.img", O_RDONLY);
     if (blk_img_fd < 0) {
         perror("fail open xv6.img");
         exit(1);
@@ -338,8 +404,6 @@ int main(int argc, char **argv) {
     while(1) {
         read_size = read(blk_img_fd, tmp, 512000);
         if (read_size <= 0) break;
-
-        printf("size: %d\n", read_size);
         tmp += read_size;
     }
 
@@ -358,16 +422,25 @@ int main(int argc, char **argv) {
             if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT) {
                 for (int i = 0; i < vcpu->kvm_run->io.count; i++) {
                     
-                    //printf("out: %u\n", port);
+                    printf("out: %u\n", port);
                     print_regs(vcpu);
 
                     char value = *(unsigned char *)((unsigned char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
                     __u16 val = *(__u16 *)((__u16 *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
                     ioctl(vcpu->fd, KVM_GET_REGS, &(vcpu->regs));
+
+                    if (port == 0x402) {
+                        for (int i_out = 0; i_out < vcpu->kvm_run->io.count; i_out++) {
+                            putchar(*(char *)((unsigned char *)vcpu->kvm_run->io.data_offset));
+                            vcpu->kvm_run->io.data_offset += vcpu->kvm_run->io.size;
+                        }
+                        break;
+                    }
                     //print_regs(vcpu);
                     handle_io_out(blk, port, value, val);
 		        }
             } else {
+                printf("in: %u\n", port);
                 switch (port)
                 {
                 case 0x1F7:
@@ -410,7 +483,6 @@ int main(int argc, char **argv) {
         } else {
             print_regs(vcpu);
             printf("exit reason: %d\n", vcpu->kvm_run->exit_reason);
-            perror("ERROR");
             exit(1);
         }
     }

@@ -1,0 +1,9 @@
+## important property of mp/mpconf structure
+ - mp->signature
+ - mp->physaddr
+ - mp->imcrp
+ - conf->signature
+ - conf->version
+ - conf->length
+ - conf->lapicaddr
+ - conf->version
