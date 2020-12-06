@@ -27,6 +27,8 @@ struct vcpu {
     struct kvm_regs regs;
 };
 
+struct kvm_lapic;
+
 struct blk {
     uint8_t *data;
     uint16_t data_reg;
@@ -334,6 +336,10 @@ int main(int argc, char **argv) {
 
      int i_in = 0;
 
+     int outfd = open("out.txt", O_RDWR);
+
+     struct kvm_lapic_state *lapic = (struct kvm_lapic_state*)malloc(sizeof(struct kvm_lapic_state));
+
     for (;;) {
         if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
             perror("KVM_RUN");
@@ -354,9 +360,11 @@ int main(int argc, char **argv) {
                     __u16 val = *(__u16 *)((__u16 *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
                     ioctl(vcpu->fd, KVM_GET_REGS, &(vcpu->regs));
 
-                    if (port == 0x402) {
+                    if (port == 0x3f8) {
+                        char value[100];
                         for (int i_out = 0; i_out < vcpu->kvm_run->io.count; i_out++) {
-                            putchar(*(char *)((unsigned char *)vcpu->kvm_run->io.data_offset));
+                            char *v = (char*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
+                            write(outfd, v, 1);
                             vcpu->kvm_run->io.data_offset += vcpu->kvm_run->io.size;
                         }
                         break;
@@ -366,6 +374,8 @@ int main(int argc, char **argv) {
 		        }
             } else {
                 printf("in: %u\n", port);
+                printf("offset: 0x%llx\n", vcpu->kvm_run->io.data_offset);
+                print_regs(vcpu);
                 switch (port)
                 {
                 case 0x1F7:
@@ -390,6 +400,8 @@ int main(int argc, char **argv) {
                     }
                     
                     break;
+                case 0x3fc:
+                    break;
                 default:
                     break;
                 }
@@ -401,10 +413,33 @@ int main(int argc, char **argv) {
         } else if (vcpu->kvm_run->exit_reason == KVM_EXIT_MMIO) {
             print_regs(vcpu);
             printf("mmio phys: 0x%llx\n", vcpu->kvm_run->mmio.phys_addr);
+            printf("data: 0x%llx\n", (__u64)vcpu->kvm_run->mmio.data);
+            printf("len: %d\n", vcpu->kvm_run->mmio.len);
+
             if (vcpu->kvm_run->mmio.is_write) {
                 printf("is write\n");
             }
-            exit(1);
+
+            if (ioctl(vcpu->fd, KVM_GET_LAPIC, lapic) < 0) {
+                perror("KVM_GET_LAPIC");
+                exit(1);
+            }
+
+            __u32 data = 0;
+            for (int i = 0; i < 4; i++) {
+                data |= vcpu->kvm_run->mmio.data[i] << i*8;
+            }
+
+            printf("data: 0x%x\n", data);
+
+            int index = vcpu->kvm_run->mmio.phys_addr - 0xffe00000;
+            printf("index: %d\n", index);
+
+            lapic->regs[index/4] = data;
+            if (ioctl(vcpu->fd, KVM_SET_LAPIC, lapic) < 0) {
+                perror("KVM_SET_LAPIC");
+                exit(1);
+            }
         } else {
             print_regs(vcpu);
             printf("exit reason: %d\n", vcpu->kvm_run->exit_reason);

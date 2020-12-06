@@ -7,3 +7,12 @@
  - conf->length
  - conf->lapicaddr
  - conf->version
+
+
+## uart port address
+
+0x3f8
+0x3f9
+0x3fa
+0x3fb
+0x3fc
