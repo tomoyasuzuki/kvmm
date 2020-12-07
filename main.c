@@ -17,6 +17,7 @@
 #define DEFAULT_FLAGS 0x0000000000000002ULL
 #define GUEST_BINARY_SIZE (4096 * 128)
 #define IMGE_SIZE 5120000
+#define LAPIC_BASE 0xffe00000
 
 typedef uint8_t u8;
 typedef uint8_t u16;
@@ -57,6 +58,13 @@ struct io {
     __u16 port;
     __u32 count;
     __u64 data_offset; 
+};
+
+struct mmio {
+    __u64 phys_addr;
+	__u8  data[8];
+	__u32 len;
+	__u8  is_write;
 };
 
 int outfd = 0;
@@ -356,6 +364,38 @@ void emulate_io(struct vcpu *vcpu, struct blk *blk) {
     }
 }
 
+void emulate_lapicw(struct vcpu *vcpu, struct kvm_lapic_state *lapic) {
+    int index = vcpu->kvm_run->mmio.phys_addr - LAPIC_BASE;
+    u32 data = 0;
+
+    if (ioctl(vcpu->fd, KVM_GET_LAPIC, lapic) < 0) {
+        error("KVM_GET_LAPIC");
+    }
+
+    for (int i = 0; i < 4; i++) {
+        data |= vcpu->kvm_run->mmio.data[i] << i*8;
+    }
+
+    printf("lapic: %d\n", index);
+
+    lapic->regs[index/4] = data;
+    if (ioctl(vcpu->fd, KVM_SET_LAPIC, lapic) < 0) {
+        error("KVM_SET_LAPIC");
+    }
+}
+
+void emulate_mmio(struct vcpu *vcpu, struct kvm_lapic_state *lapic) {
+    struct mmio mmio = {
+        .data = vcpu->kvm_run->mmio.data,
+        .is_write = vcpu->kvm_run->mmio.is_write,
+        .len = vcpu->kvm_run->mmio.len,
+        .phys_addr = vcpu->kvm_run->mmio.phys_addr
+    };
+
+    if (mmio.phys_addr >= LAPIC_BASE)
+        emulate_lapicw(vcpu, lapic);
+}
+
 int main(int argc, char **argv) {
     struct vm *vm = malloc(sizeof(struct vm));
     struct vcpu *vcpu = malloc(sizeof(struct vcpu));
@@ -414,33 +454,34 @@ int main(int argc, char **argv) {
             printf("HLT\n");
             exit(1);
         } else if (vcpu->kvm_run->exit_reason == KVM_EXIT_MMIO) {
-            print_regs(vcpu);
-            printf("mmio phys: 0x%llx\n", vcpu->kvm_run->mmio.phys_addr);
-            printf("data: 0x%lx\n", (u64)vcpu->kvm_run->mmio.data);
-            printf("len: %d\n", vcpu->kvm_run->mmio.len);
+            // print_regs(vcpu);
+            // printf("mmio phys: 0x%llx\n", vcpu->kvm_run->mmio.phys_addr);
+            // printf("data: 0x%lx\n", (u64)vcpu->kvm_run->mmio.data);
+            // printf("len: %d\n", vcpu->kvm_run->mmio.len);
+            emulate_mmio(vcpu, lapic);
 
-            if (vcpu->kvm_run->mmio.is_write) {
-                printf("is write\n");
-            }
+            // if (vcpu->kvm_run->mmio.is_write) {
+            //     printf("is write\n");
+            // }
 
-            if (ioctl(vcpu->fd, KVM_GET_LAPIC, lapic) < 0) {
-                error("KVM_GET_LAPIC");
-            }
+            // if (ioctl(vcpu->fd, KVM_GET_LAPIC, lapic) < 0) {
+            //     error("KVM_GET_LAPIC");
+            // }
 
-            u32 data = 0;
-            for (int i = 0; i < 4; i++) {
-                data |= vcpu->kvm_run->mmio.data[i] << i*8;
-            }
+            // u32 data = 0;
+            // for (int i = 0; i < 4; i++) {
+            //     data |= vcpu->kvm_run->mmio.data[i] << i*8;
+            // }
 
-            printf("data: 0x%x\n", data);
+            // printf("data: 0x%x\n", data);
 
-            int index = vcpu->kvm_run->mmio.phys_addr - 0xffe00000;
-            printf("index: %d\n", index);
+            // int index = vcpu->kvm_run->mmio.phys_addr - 0xffe00000;
+            // printf("index: %d\n", index);
 
-            lapic->regs[index/4] = data;
-            if (ioctl(vcpu->fd, KVM_SET_LAPIC, lapic) < 0) {
-                error("KVM_SET_LAPIC");
-            }
+            // lapic->regs[index/4] = data;
+            // if (ioctl(vcpu->fd, KVM_SET_LAPIC, lapic) < 0) {
+            //     error("KVM_SET_LAPIC");
+            // }
         } else {
             print_regs(vcpu);
             printf("exit reason: %d\n", vcpu->kvm_run->exit_reason);
