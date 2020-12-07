@@ -17,6 +17,7 @@
 #define DEFAULT_FLAGS 0x0000000000000002ULL
 #define GUEST_BINARY_SIZE (4096 * 128)
 #define IMGE_SIZE 5120000
+#define LAPIC_BASE 0xffe00000
 
 typedef uint8_t u8;
 typedef uint8_t u16;
@@ -57,6 +58,13 @@ struct io {
     __u16 port;
     __u32 count;
     __u64 data_offset; 
+};
+
+struct mmio {
+    __u64 phys_addr;
+	__u8  data[8];
+	__u32 len;
+	__u8  is_write;
 };
 
 int outfd = 0;
@@ -192,46 +200,6 @@ void create_blk(struct blk *blk) {
     }
 }
 
-void handle_io_out(struct blk *blk, int port, char value, u16 val) {
-    switch (port)
-    {
-    case 0x1F0:
-        blk->data_reg = val;
-        break;
-    case 0x1F2:
-        blk->sec_count_reg = value;
-        break;
-    case 0x1F3:
-        blk->lba_low_reg = value;
-        break;            
-    case 0x1F4:
-        blk->lba_middle_reg = value;
-        break;
-    case 0x1F5:
-        blk->lba_high_reg = value;
-    case 0x1F6:
-        blk->drive_head_reg = value;
-        break;
-    case 0x1F7:
-        if (value == 0x20) {
-            u32 i = 0 | blk->lba_low_reg | (blk->lba_middle_reg << 8) | (blk->lba_high_reg << 16) |
-                          ((blk->drive_head_reg & 0x0F) << 24);
-            //printf("i: %d\n", i);
-            blk->index = i * 512;
-            break;
-        }
-
-        printf("value: %d\n", value);
-        break;
-    case 0x8a00:
-        printf("error 0x8a00\n");
-        exit(1);
-        break;
-    default:
-        break;
-    }
-}
-
 void init_kvm(struct vm *vm) {
     vm->vm_fd = open("/dev/kvm", O_RDWR);
     if (vm->vm_fd < 0) { 
@@ -268,13 +236,14 @@ void emulate_diskr(struct blk *blk) {
     blk->index = i * 512;
 }
 
-void emulate_disk_port(struct vcpu *vcpu, 
+void emulate_disk_portw(struct vcpu *vcpu, 
                         struct blk *blk, struct io io) {
     u8 val1;
     u16 val2;
 
-    if (io.size != 4)
-        return;
+    //TODO: check io size
+    //if (io.size !=  (1 | 2))
+        //return;
     
     if (io.port == 0x1F0) {
         val2 = *(u16*)((u16*)vcpu->kvm_run + io.data_offset);
@@ -311,7 +280,31 @@ void emulate_disk_port(struct vcpu *vcpu,
     }
 }
 
-void emulate_uart_port(struct vcpu *vcpu, struct io io) {
+void emulate_disk_portr(struct vcpu *vcpu,
+                        struct blk *blk) {
+    u32 data = 0;
+
+    switch (vcpu->kvm_run->io.port) {
+    case 0x1F0:
+        for (int i = 0; i < vcpu->kvm_run->io.count; ++i) {
+            for (int j = 0; j < 4; j++) {
+                data |= blk->data[blk->index] << (8 * j);
+                blk->index += 1;
+            }
+            *(u32*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset) = data;
+            vcpu->kvm_run->io.data_offset += vcpu->kvm_run->io.size;
+            data = 0;
+        }
+        break;
+    case 0x1F7:
+         *(unsigned char*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset) = blk->status_command_reg; 
+        break;
+    default:
+        break;
+    }
+}
+
+void emulate_uart_portw(struct vcpu *vcpu, struct io io) {
     if (io.port != 0x3f8) return;
 
     for (int i = 0; i < io.count; i++) {
@@ -322,13 +315,22 @@ void emulate_uart_port(struct vcpu *vcpu, struct io io) {
 }
 
 void emulate_io_out(struct vcpu *vcpu, struct blk *blk, struct io io) {
-    switch (io.port)
-    {
+    switch (io.port) {
     case 0x1F0 ... 0x1F7:
-        emulate_disk_port(vcpu, blk, io);
+        emulate_disk_portw(vcpu, blk, io);
         break;
     case 0x3F8:
-        emulate_uart_port(vcpu, io);
+        emulate_uart_portw(vcpu, io);
+        break;
+    default:
+        break;
+    }
+}
+
+void emulate_io_in(struct vcpu *vcpu, struct blk *blk, struct io io) {
+    switch (io.port) {
+    case 0x1F0 ... 0x1F7:
+        emulate_disk_portr(vcpu, blk);
         break;
     default:
         break;
@@ -351,10 +353,47 @@ void emulate_io(struct vcpu *vcpu, struct blk *blk) {
         emulate_io_out(vcpu, blk, io);
         break;
     case KVM_EXIT_IO_IN:
+        printf("in: %d\n", io.port);
+        print_regs(vcpu);
+        emulate_io_in(vcpu, blk, io);
         break;
     default:
+        printf("exit reason: %d\n", vcpu->kvm_run->exit_reason);
+        print_regs(vcpu);
         break;
     }
+}
+
+void emulate_lapicw(struct vcpu *vcpu, struct kvm_lapic_state *lapic) {
+    int index = vcpu->kvm_run->mmio.phys_addr - LAPIC_BASE;
+    u32 data = 0;
+
+    if (ioctl(vcpu->fd, KVM_GET_LAPIC, lapic) < 0) {
+        error("KVM_GET_LAPIC");
+    }
+
+    for (int i = 0; i < 4; i++) {
+        data |= vcpu->kvm_run->mmio.data[i] << i*8;
+    }
+
+    printf("lapic: %d\n", index);
+
+    lapic->regs[index/4] = data;
+    if (ioctl(vcpu->fd, KVM_SET_LAPIC, lapic) < 0) {
+        error("KVM_SET_LAPIC");
+    }
+}
+
+void emulate_mmio(struct vcpu *vcpu, struct kvm_lapic_state *lapic) {
+    struct mmio mmio = {
+        .data = vcpu->kvm_run->mmio.data,
+        .is_write = vcpu->kvm_run->mmio.is_write,
+        .len = vcpu->kvm_run->mmio.len,
+        .phys_addr = vcpu->kvm_run->mmio.phys_addr
+    };
+
+    if (mmio.phys_addr >= LAPIC_BASE)
+        emulate_lapicw(vcpu, lapic);
 }
 
 int main(int argc, char **argv) {
@@ -384,113 +423,16 @@ int main(int argc, char **argv) {
 
         struct kvm_run *run = vcpu->kvm_run;
 
-        // switch (run->exit_reason) {
-        // case KVM_EXIT_IO:
-        //     emulate_io(run, vcpu);
-        //     break;
-        // case KVM_EXIT_MMIO:
-        //     break;
-        // default:
-        //     break;
-        // }
-
-        int port = vcpu->kvm_run->io.port;
-        u32 d = 0;
-
-        if (vcpu->kvm_run->exit_reason == KVM_EXIT_IO) {
-
-            if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT) {
-                //emulate_io(vcpu, blk);
-                for (int i = 0; i < vcpu->kvm_run->io.count; i++) {
-
-                    char value = *(unsigned char *)((unsigned char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
-                    u16 val = *(u16 *)((u16 *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
-                    ioctl(vcpu->fd, KVM_GET_REGS, &(vcpu->regs));
-
-                    if (port == 0x3f8) {
-                        char value[100];
-                        for (int i_out = 0; i_out < vcpu->kvm_run->io.count; i_out++) {
-                            char *v = (char*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
-                            write(outfd, v, 1);
-                            vcpu->kvm_run->io.data_offset += vcpu->kvm_run->io.size;
-                        }
-                        break;
-                    }
-                    printf("out: %d\n", vcpu->kvm_run->io.port);
-                    print_regs(vcpu);
-                    handle_io_out(blk, port, value, val);
-		       }
-            } else {
-                //printf("in: %u\n", port);
-                //printf("offset: 0x%llx\n", vcpu->kvm_run->io.data_offset);
-                //print_regs(vcpu);
-                switch (port)
-                {
-                case 0x1F7:
-                    *(unsigned char *)((unsigned char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset) = blk->status_command_reg; 
-                    break;
-                case 0x1F0:
-                    for (int i = 0; i < vcpu->kvm_run->io.count; ++i) {
-                        for (int j = 0; j < 4; j++) {
-                            //printf("blk index: %d\n", blk->index);
-                            d |= blk->data[blk->index] << (8 * j);
-                            blk->index += 1;
-                        }
-                        // 7f 0001111111
-                        // 45 000000000001000101
-                        //break;
-                        // 46 4c 45 7f = 01000110010011000100010101111111 
-
-                        *(u32 *)((unsigned char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset) = d;
-                        vcpu->kvm_run->io.data_offset += vcpu->kvm_run->io.size;
-                        d = 0;
-                    }
-                    
-                    break;
-                case 0x3fc:
-                    break;
-                default:
-                    break;
-                }
-            }
-        } else if (vcpu->kvm_run->exit_reason == KVM_EXIT_HLT) {
-            print_regs(vcpu);
-            printf("HLT\n");
-            exit(1);
-        } else if (vcpu->kvm_run->exit_reason == KVM_EXIT_MMIO) {
-            print_regs(vcpu);
-            printf("mmio phys: 0x%llx\n", vcpu->kvm_run->mmio.phys_addr);
-            printf("data: 0x%lx\n", (u64)vcpu->kvm_run->mmio.data);
-            printf("len: %d\n", vcpu->kvm_run->mmio.len);
-
-            if (vcpu->kvm_run->mmio.is_write) {
-                printf("is write\n");
-            }
-
-            if (ioctl(vcpu->fd, KVM_GET_LAPIC, lapic) < 0) {
-                error("KVM_GET_LAPIC");
-            }
-
-            u32 data = 0;
-            for (int i = 0; i < 4; i++) {
-                data |= vcpu->kvm_run->mmio.data[i] << i*8;
-            }
-
-            printf("data: 0x%x\n", data);
-
-            int index = vcpu->kvm_run->mmio.phys_addr - 0xffe00000;
-            printf("index: %d\n", index);
-
-            lapic->regs[index/4] = data;
-            if (ioctl(vcpu->fd, KVM_SET_LAPIC, lapic) < 0) {
-                error("KVM_SET_LAPIC");
-            }
-        } else {
-            print_regs(vcpu);
-            printf("exit reason: %d\n", vcpu->kvm_run->exit_reason);
-            exit(1);
+        switch (run->exit_reason) {
+        case KVM_EXIT_IO:
+            emulate_io(vcpu, blk);
+            break;
+        case KVM_EXIT_MMIO:
+            emulate_mmio(vcpu, lapic);
+            break;
+        default:
+            break;
         }
     }
-
     return 1;   
 }
