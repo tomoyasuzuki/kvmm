@@ -14,6 +14,7 @@
 #define START_ADDRESS 0x7c00
 #define GUEST_MEMORY_SIZE 0x80000000
 #define ALIGNMENT_SIZE 0x1000
+#define DEFAULT_FLAGS 0x0000000000000002ULL
 
 typedef uint8_t u8;
 typedef uint8_t u16;
@@ -85,30 +86,26 @@ void set_sregs(struct kvm_sregs *sregs) {
 
 void set_regs(struct vcpu *vcpu) {
     if (ioctl(vcpu->fd, KVM_GET_SREGS, &(vcpu->sregs)) < 0) {
-        perror("KVM_GET_SREGS");
-        exit(1);
+        error("KVM_GET_SREGS");
     }
 
     set_sregs(&vcpu->sregs);
 
     if (ioctl(vcpu->fd, KVM_SET_SREGS, &(vcpu->sregs)) < 0) {
-        perror("KVM_SET_SREGS");
-        exit(1);
+        error("KVM_SET_SREGS");
     }
 
-    vcpu->regs.rflags = 0x0000000000000002ULL;
+    vcpu->regs.rflags = DEFAULT_FLAGS;
     vcpu->regs.rip = START_ADDRESS;
 
     if (ioctl(vcpu->fd, KVM_SET_REGS, &(vcpu->regs)) < 0) {
-        perror("KVM_SET_REGS");
-        exit(1);
+        error("KVM_SET_REGS");
     }
 }
 
 void set_irqchip(struct vm *vm) {
     if (ioctl(vm->fd, KVM_CREATE_IRQCHIP, 0) < 0) {
-        perror("KVM_CREATE_IRQCHIP");
-        exit(1);
+        error("KVM_CREATE_IRQCHIP");
     }
 }
 
