@@ -423,71 +423,16 @@ int main(int argc, char **argv) {
 
         struct kvm_run *run = vcpu->kvm_run;
 
-        // switch (run->exit_reason) {
-        // case KVM_EXIT_IO:
-        //     emulate_io(run, vcpu);
-        //     break;
-        // case KVM_EXIT_MMIO:
-        //     break;
-        // default:
-        //     break;
-        // }
-
-        int port = vcpu->kvm_run->io.port;
-        u32 d = 0;
-
-        if (vcpu->kvm_run->exit_reason == KVM_EXIT_IO) {
-
-            if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT) {
-                emulate_io(vcpu, blk);
-           
-            } else {
-                //printf("in: %u\n", port);
-                //printf("offset: 0x%llx\n", vcpu->kvm_run->io.data_offset);
-                //print_regs(vcpu);
-            //     switch (port)
+        switch (run->exit_reason) {
+        case KVM_EXIT_IO:
             emulate_io(vcpu, blk);
-
-             }
-        } else if (vcpu->kvm_run->exit_reason == KVM_EXIT_HLT) {
-            print_regs(vcpu);
-            printf("HLT\n");
-            exit(1);
-        } else if (vcpu->kvm_run->exit_reason == KVM_EXIT_MMIO) {
-            // print_regs(vcpu);
-            // printf("mmio phys: 0x%llx\n", vcpu->kvm_run->mmio.phys_addr);
-            // printf("data: 0x%lx\n", (u64)vcpu->kvm_run->mmio.data);
-            // printf("len: %d\n", vcpu->kvm_run->mmio.len);
+            break;
+        case KVM_EXIT_MMIO:
             emulate_mmio(vcpu, lapic);
-
-            // if (vcpu->kvm_run->mmio.is_write) {
-            //     printf("is write\n");
-            // }
-
-            // if (ioctl(vcpu->fd, KVM_GET_LAPIC, lapic) < 0) {
-            //     error("KVM_GET_LAPIC");
-            // }
-
-            // u32 data = 0;
-            // for (int i = 0; i < 4; i++) {
-            //     data |= vcpu->kvm_run->mmio.data[i] << i*8;
-            // }
-
-            // printf("data: 0x%x\n", data);
-
-            // int index = vcpu->kvm_run->mmio.phys_addr - 0xffe00000;
-            // printf("index: %d\n", index);
-
-            // lapic->regs[index/4] = data;
-            // if (ioctl(vcpu->fd, KVM_SET_LAPIC, lapic) < 0) {
-            //     error("KVM_SET_LAPIC");
-            // }
-        } else {
-            print_regs(vcpu);
-            printf("exit reason: %d\n", vcpu->kvm_run->exit_reason);
-            exit(1);
+            break;
+        default:
+            break;
         }
     }
-
     return 1;   
 }
