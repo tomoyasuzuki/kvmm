@@ -28,3 +28,23 @@ void *dst = vm->mem + 0x400;
 
     memcpy(dst, mp, sizeof(struct mp));
     memcpy(mp->physaddr, conf, sizeof(struct mpconf));
+
+    //     for (int i = 0; i < vcpu->kvm_run->io.count; i++) {
+
+            //         char value = *(unsigned char *)((unsigned char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
+            //         u16 val = *(u16 *)((u16 *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
+            //         ioctl(vcpu->fd, KVM_GET_REGS, &(vcpu->regs));
+
+            //         if (port == 0x3f8) {
+            //             char value[100];
+            //             for (int i_out = 0; i_out < vcpu->kvm_run->io.count; i_out++) {
+            //                 char *v = (char*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
+            //                 write(outfd, v, 1);
+            //                 vcpu->kvm_run->io.data_offset += vcpu->kvm_run->io.size;
+            //             }
+            //             break;
+            //         }
+            //         printf("out: %d\n", vcpu->kvm_run->io.port);
+            //         print_regs(vcpu);
+            //         handle_io_out(blk, port, value, val);
+		    //    }
