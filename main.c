@@ -56,7 +56,7 @@ void error(char *message) {
 }
 
 void init_vcpu(struct vm *vm, struct vcpu *vcpu) {
-    int vcpu_mmap_size;
+    int mmap_size;
 
     vcpu->fd = ioctl(vm->fd, KVM_CREATE_VCPU, 0);
     
@@ -64,13 +64,13 @@ void init_vcpu(struct vm *vm, struct vcpu *vcpu) {
         error("KVM_CREATE_VCPU");
     }
 
-    vcpu_mmap_size = ioctl(vm->vm_fd, KVM_GET_VCPU_MMAP_SIZE, 0);
+    mmap_size = ioctl(vm->vm_fd, KVM_GET_VCPU_MMAP_SIZE, 0);
 
-    if (vcpu_mmap_size <= 0) {
+    if (mmap_size <= 0) {
         error("KVM_GET_VCPU_MMAP_SIZE");
     }
 
-    vcpu->kvm_run = mmap(NULL, vcpu_mmap_size, 
+    vcpu->kvm_run = mmap(NULL, mmap_size, 
                         PROT_READ | PROT_WRITE,
                         MAP_SHARED, vcpu->fd, 0);
 
@@ -104,8 +104,8 @@ void set_regs(struct vcpu *vcpu) {
     }
 }
 
-void set_irqchip(struct vm *vm) {
-    if (ioctl(vm->fd, KVM_CREATE_IRQCHIP, 0) < 0) {
+void create_irqchip(int fd) {
+    if (ioctl(fd, KVM_CREATE_IRQCHIP, 0) < 0) {
         error("KVM_CREATE_IRQCHIP");
     }
 }
@@ -225,39 +225,47 @@ void handle_io_out(struct blk *blk, int port, char value, u16 val) {
     }
 }
 
-int main(int argc, char **argv) {
-    struct vm *vm = (struct vm*)malloc(sizeof(struct vm));
-    struct vcpu *vcpu = (struct vcpu*)malloc(sizeof(struct vcpu));
-    struct kvm_userspace_memory_region *memreg = (struct kvm_userspace_memory_region*)malloc(sizeof(struct kvm_userspace_memory_region));
-    struct blk *blk = (struct blk*)malloc(sizeof(struct blk));
-
+void init_kvm(struct vm *vm) {
     vm->vm_fd = open("/dev/kvm", O_RDWR);
     if (vm->vm_fd < 0) { 
         error("open /dev/kvm");
     }
+}
 
+void create_vm(struct vm *vm) {
     vm->fd = ioctl(vm->vm_fd, KVM_CREATE_VM, 0);
     if (vm->fd < 0) {
         error("KVM_CREATE_VM");
     }
+}
 
-    set_irqchip(vm);
-
-    if (ioctl(vm->fd, KVM_CREATE_PIT) < 0) {
+void create_pit(int fd) {
+    if (ioctl(fd, KVM_CREATE_PIT) < 0) {
         error("KVM_CREATE_PIT");
     }
+}
 
-    if (ioctl(vm->fd, KVM_SET_TSS_ADDR, 0xfffbd000) < 0) {
+void set_tss(int fd) {
+    if (ioctl(fd, KVM_SET_TSS_ADDR, 0xfffbd000) < 0) {
         error("KVM_SET_TSS_ADDR");
     }
+}
 
+int main(int argc, char **argv) {
+    struct vm *vm = malloc(sizeof(struct vm));
+    struct vcpu *vcpu = malloc(sizeof(struct vcpu));
+    struct blk *blk = malloc(sizeof(struct blk));
+    kvm_mem *memreg = malloc(sizeof(kvm_mem));
+
+    init_kvm(vm);
+    create_vm(vm);
+    create_irqchip(vm->fd);
+    create_pit(vm->fd);
+    //set_tss(vm->fd);
     set_vm_mem(vm, memreg, 0, GUEST_MEMORY_SIZE);    
-
     load_guest_binary(vm->mem);
-
     init_vcpu(vm, vcpu);
     set_regs(vcpu);
-
     //set_blk(blk);
 
     blk->data = malloc(5120000);
