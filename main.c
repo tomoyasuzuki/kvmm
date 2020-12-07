@@ -9,9 +9,11 @@
 #include <stdint.h>
 #include <linux/kvm.h>
 
-#define CODE_START 0
+#define CODE_START 0x0
 #define GUEST_PATH "../xv6/xv6.img"
 #define START_ADDRESS 0x7c00
+#define GUEST_MEMORY_SIZE 0x80000000
+#define ALIGNMENT_SIZE 0x1000
 
 typedef uint8_t u8;
 typedef uint8_t u16;
@@ -136,29 +138,28 @@ void load_guest_binary(void *dst) {
     }
 }
 
-void set_user_memory_region(struct vm *vm, 
-        struct kvm_userspace_memory_region *memreg) {
-    size_t guest_memory_size = 0x80000000;
-    size_t alignment_size = 0x1000;
-
-    int result = posix_memalign(&(vm->mem), 
-            alignment_size, 
-            guest_memory_size);
-
-    if (result != 0) {
-        printf("mmap fail: %d\n", result);
+void memalign(void **dst, size_t size, size_t align) {
+    if (posix_memalign(dst, size, align) < 0) {
+        printf("memalign: faile\n");
         exit(1);
     }
+}
+
+void set_user_memory_region(struct vm *vm, 
+                            kvm_mem *memreg,
+                            u64 phys_start,
+                            size_t size) {
+
+    memalign(&(vm->mem), size, ALIGNMENT_SIZE);
 
     memreg->slot = 0;
 	memreg->flags = 0;
-	memreg->guest_phys_addr = 0;
-	memreg->memory_size = (u64)guest_memory_size;
+	memreg->guest_phys_addr = phys_start;
+	memreg->memory_size = (u64)size;
 	memreg->userspace_addr = (unsigned long)vm->mem;
     
     if (ioctl(vm->fd, KVM_SET_USER_MEMORY_REGION, memreg) < 0) {
-		perror("KVM_SET_USER_MEMORY_REGION");
-        exit(1);
+		error("KVM_SET_USER_MEMORY_REGION");
 	}
 }
 
@@ -263,7 +264,7 @@ int main(int argc, char **argv) {
         error("KVM_SET_TSS_ADDR");
     }
 
-    set_user_memory_region(vm, memreg);    
+    set_user_memory_region(vm, memreg, 0, GUEST_MEMORY_SIZE);    
 
     load_guest_binary(vm->mem);
 
