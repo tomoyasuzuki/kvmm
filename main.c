@@ -11,7 +11,12 @@
 
 #define CODE_START 0
 #define GUEST_PATH "../xv6/xv6.img"
+#define START_ADDRESS 0x7c00
 
+typedef uint8_t u8;
+typedef uint8_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
 typedef struct kvm_userspace_memory_region kvm_mem;
 
 struct vm {
@@ -30,60 +35,15 @@ struct vcpu {
 struct kvm_lapic;
 
 struct blk {
-    uint8_t *data;
-    uint16_t data_reg;
-    uint8_t sec_count_reg;
-    uint8_t lba_low_reg;
-    uint8_t lba_middle_reg;
-    uint8_t lba_high_reg;
-    uint8_t drive_head_reg;
-    uint8_t status_command_reg;
-    uint32_t index;
-};
-
-struct mp {             // floating pointer
-  unsigned char signature[4];           // "_MP_"
-  void *physaddr;               // phys addr of MP config table
-  unsigned char length;                 // 1
-  unsigned char specrev;                // [14]
-  unsigned char checksum;               // all bytes must add up to 0
-  unsigned char type;                   // MP system config type
-  unsigned char imcrp;
-  unsigned char reserved[3];
-};
-
-struct mpconf {         // configuration table header
-  unsigned char signature[4];           // "PCMP"
-  unsigned short length;                // total table length
-  unsigned char version;                // [14]
-  unsigned char checksum;               // all bytes must add up to 0
-  unsigned char product[20];            // product id
-  unsigned int *oemtable;               // OEM table pointer
-  unsigned short oemlength;             // OEM table length
-  unsigned short entry;                 // entry count
-  unsigned int *lapicaddr;              // address of local APIC
-  unsigned short xlength;               // extended table length
-  unsigned char xchecksum;              // extended table checksum
-  unsigned char reserved;
-};
-
-struct mpproc {         // processor table entry
-  unsigned char type;                   // entry type (0)
-  unsigned char apicid;                 // local APIC id
-  unsigned char version;                // local APIC verison
-  unsigned char flags;                  // CPU flags
-    #define MPBOOT 0x02           // This proc is the bootstrap processor.
-  unsigned char signature[4];           // CPU signature
-  unsigned int feature;                 // feature flags from CPUID instruction
-  unsigned char reserved[8];
-};
-
-struct mpioapic {       // I/O APIC table entry
-  unsigned char type;                   // entry type (2)
-  unsigned char apicno;                 // I/O APIC id
-  unsigned char version;                // I/O APIC version
-  unsigned char flags;                  // I/O APIC flags
-  unsigned int *addr;                  // I/O APIC address
+    u8 *data;
+    u16 data_reg;
+    u8 sec_count_reg;
+    u8 lba_low_reg;
+    u8 lba_middle_reg;
+    u8 lba_high_reg;
+    u8 drive_head_reg;
+    u8 status_command_reg;
+    u32 index;
 };
 
 void init_vcpu(struct vm *vm, struct vcpu *vcpu) {
@@ -128,7 +88,7 @@ void set_regs(struct vcpu *vcpu) {
     }
 
     vcpu->regs.rflags = 0x0000000000000002ULL;
-    vcpu->regs.rip = 0x7c00;
+    vcpu->regs.rip = START_ADDRESS;
 
     if (ioctl(vcpu->fd, KVM_SET_REGS, &(vcpu->regs)) < 0) {
         perror("KVM_SET_REGS");
@@ -141,6 +101,11 @@ void set_irqchip(struct vm *vm) {
         perror("KVM_CREATE_IRQCHIP");
         exit(1);
     }
+}
+
+void error(char *message) {
+    perror(message);
+    exit(1);
 }
 
 void load_bios(void *dst) {
@@ -163,7 +128,7 @@ void load_guest_binary(void *dst) {
     int ret = 0;
     char *tmp = (char*)dst; 
     while(1) {
-        ret = read(biosfd, tmp + 0x7c00, 4096 * 128);
+        ret = read(biosfd, tmp + START_ADDRESS, 4096 * 128);
         if (ret <= 0) break;
 
         printf("read size: %d\n", ret);
@@ -188,7 +153,7 @@ void set_user_memory_region(struct vm *vm,
     memreg->slot = 0;
 	memreg->flags = 0;
 	memreg->guest_phys_addr = 0;
-	memreg->memory_size = (__u64)guest_memory_size;
+	memreg->memory_size = (u64)guest_memory_size;
 	memreg->userspace_addr = (unsigned long)vm->mem;
     
     if (ioctl(vm->fd, KVM_SET_USER_MEMORY_REGION, memreg) < 0) {
@@ -232,7 +197,7 @@ void set_blk(struct blk *blk) {
     }
 }
 
-void handle_io_out(struct blk *blk, int port, char value, __u16 val) {
+void handle_io_out(struct blk *blk, int port, char value, u16 val) {
     switch (port)
     {
     case 0x1F0:
@@ -254,7 +219,7 @@ void handle_io_out(struct blk *blk, int port, char value, __u16 val) {
         break;
     case 0x1F7:
         if (value == 0x20) {
-            uint32_t i = 0 | blk->lba_low_reg | (blk->lba_middle_reg << 8) | (blk->lba_high_reg << 16) |
+            u32 i = 0 | blk->lba_low_reg | (blk->lba_middle_reg << 8) | (blk->lba_high_reg << 16) |
                           ((blk->drive_head_reg & 0x0F) << 24);
             //printf("i: %d\n", i);
             blk->index = i * 512;
@@ -280,26 +245,22 @@ int main(int argc, char **argv) {
 
     vm->vm_fd = open("/dev/kvm", O_RDWR);
     if (vm->vm_fd < 0) { 
-        perror("open /dev/kvm/");
-        exit(1);
+        error("open /dev/kvm");
     }
 
     vm->fd = ioctl(vm->vm_fd, KVM_CREATE_VM, 0);
     if (vm->fd < 0) {
-        perror("KVM_CREATE_VM");
-        exit(1);
+        error("KVM_CREATE_VM");
     }
 
     set_irqchip(vm);
 
     if (ioctl(vm->fd, KVM_CREATE_PIT) < 0) {
-        perror("KVM_CREATE_PIT");
-        exit(1);
+        error("KVM_CREATE_PIT");
     }
 
     if (ioctl(vm->fd, KVM_SET_TSS_ADDR, 0xfffbd000) < 0) {
-        perror("KVM_SET_TSS_ADDR");
-        exit(1);
+        error("KVM_SET_TSS_ADDR");
     }
 
     set_user_memory_region(vm, memreg);    
@@ -322,8 +283,7 @@ int main(int argc, char **argv) {
 
     int blk_img_fd = open("../xv6/xv6.img", O_RDONLY);
     if (blk_img_fd < 0) {
-        perror("fail open xv6.img");
-        exit(1);
+        error("fail open xv6.img");
     }
 
     int read_size = 0;
@@ -342,22 +302,23 @@ int main(int argc, char **argv) {
 
     for (;;) {
         if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
-            perror("KVM_RUN");
-            exit(1);
+            error("KVM_RUN");
         }
 
         if (vcpu->kvm_run->exit_reason == KVM_EXIT_IO) {
             int port = vcpu->kvm_run->io.port;
-            uint32_t d = 0;
+            u32 d = 0;
 
             if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT) {
                 for (int i = 0; i < vcpu->kvm_run->io.count; i++) {
                     
-                    printf("out: %u\n", port);
-                    print_regs(vcpu);
+                    if (port == 0x1F7) {
+                        printf("out: %u\n", port);
+                        print_regs(vcpu);
+                    }
 
                     char value = *(unsigned char *)((unsigned char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
-                    __u16 val = *(__u16 *)((__u16 *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
+                    u16 val = *(u16 *)((u16 *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
                     ioctl(vcpu->fd, KVM_GET_REGS, &(vcpu->regs));
 
                     if (port == 0x3f8) {
@@ -373,9 +334,9 @@ int main(int argc, char **argv) {
                     handle_io_out(blk, port, value, val);
 		        }
             } else {
-                printf("in: %u\n", port);
-                printf("offset: 0x%llx\n", vcpu->kvm_run->io.data_offset);
-                print_regs(vcpu);
+                //printf("in: %u\n", port);
+                //printf("offset: 0x%llx\n", vcpu->kvm_run->io.data_offset);
+                //print_regs(vcpu);
                 switch (port)
                 {
                 case 0x1F7:
@@ -394,7 +355,7 @@ int main(int argc, char **argv) {
                         //break;
                         // 46 4c 45 7f = 01000110010011000100010101111111 
 
-                        *(uint32_t *)((unsigned char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset) = d;
+                        *(u32 *)((unsigned char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset) = d;
                         vcpu->kvm_run->io.data_offset += vcpu->kvm_run->io.size;
                         d = 0;
                     }
@@ -413,7 +374,7 @@ int main(int argc, char **argv) {
         } else if (vcpu->kvm_run->exit_reason == KVM_EXIT_MMIO) {
             print_regs(vcpu);
             printf("mmio phys: 0x%llx\n", vcpu->kvm_run->mmio.phys_addr);
-            printf("data: 0x%llx\n", (__u64)vcpu->kvm_run->mmio.data);
+            printf("data: 0x%lx\n", (u64)vcpu->kvm_run->mmio.data);
             printf("len: %d\n", vcpu->kvm_run->mmio.len);
 
             if (vcpu->kvm_run->mmio.is_write) {
@@ -421,11 +382,10 @@ int main(int argc, char **argv) {
             }
 
             if (ioctl(vcpu->fd, KVM_GET_LAPIC, lapic) < 0) {
-                perror("KVM_GET_LAPIC");
-                exit(1);
+                error("KVM_GET_LAPIC");
             }
 
-            __u32 data = 0;
+            u32 data = 0;
             for (int i = 0; i < 4; i++) {
                 data |= vcpu->kvm_run->mmio.data[i] << i*8;
             }
@@ -437,8 +397,7 @@ int main(int argc, char **argv) {
 
             lapic->regs[index/4] = data;
             if (ioctl(vcpu->fd, KVM_SET_LAPIC, lapic) < 0) {
-                perror("KVM_SET_LAPIC");
-                exit(1);
+                error("KVM_SET_LAPIC");
             }
         } else {
             print_regs(vcpu);
