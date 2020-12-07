@@ -15,6 +15,7 @@
 #define GUEST_MEMORY_SIZE 0x80000000
 #define ALIGNMENT_SIZE 0x1000
 #define DEFAULT_FLAGS 0x0000000000000002ULL
+#define GUEST_BINARY_SIZE (4096 * 128)
 
 typedef uint8_t u8;
 typedef uint8_t u16;
@@ -109,31 +110,18 @@ void set_irqchip(struct vm *vm) {
     }
 }
 
-void load_bios(void *dst) {
-    int biosfd = open("../seabios/out/bios.bin", O_RDONLY);
-
-    int ret = 0;
-    char *tmp = (char*)dst;
-    ret = read(biosfd, tmp, 1024 * 128);
-    printf("size: %d\n", ret);
-}
-
 void load_guest_binary(void *dst) {
-    int biosfd = open("../xv6/bootblock", O_RDONLY);
+    int fd = open("../xv6/bootblock", O_RDONLY);
+    if (fd < 0) 
+        error("open fail");
     
-    if (biosfd < 0) {
-        perror("open fail");
-        exit(1);
-    }
-
-    int ret = 0;
-    char *tmp = (char*)dst; 
-    while(1) {
-        ret = read(biosfd, tmp + START_ADDRESS, 4096 * 128);
-        if (ret <= 0) break;
-
-        printf("read size: %d\n", ret);
-        tmp += ret;
+    void *tmp = dst;
+    for(;;) {
+        int size = read(fd, tmp + START_ADDRESS, 
+                        GUEST_BINARY_SIZE);
+        if (size <= 0) 
+            break;
+        tmp += size;
     }
 }
 
