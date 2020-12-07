@@ -48,25 +48,32 @@ struct blk {
     u32 index;
 };
 
+void error(char *message) {
+    perror(message);
+    exit(1);
+}
+
 void init_vcpu(struct vm *vm, struct vcpu *vcpu) {
     int vcpu_mmap_size;
 
     vcpu->fd = ioctl(vm->fd, KVM_CREATE_VCPU, 0);
+    
     if (vcpu->fd < 0) {
-        perror("KVM_CREATE_VCPU");
-        exit(1);
+        error("KVM_CREATE_VCPU");
     }
 
     vcpu_mmap_size = ioctl(vm->vm_fd, KVM_GET_VCPU_MMAP_SIZE, 0);
+
     if (vcpu_mmap_size <= 0) {
-        perror("KVM_GET_CPU_MMAP_SIZE");
-        exit(1);
+        error("KVM_GET_VCPU_MMAP_SIZE");
     }
 
-    vcpu->kvm_run = mmap(NULL, vcpu_mmap_size, PROT_READ | PROT_WRITE,
-            MAP_SHARED, vcpu->fd, 0);
+    vcpu->kvm_run = mmap(NULL, vcpu_mmap_size, 
+                        PROT_READ | PROT_WRITE,
+                        MAP_SHARED, vcpu->fd, 0);
+
     if (vcpu->kvm_run == MAP_FAILED) {
-        perror("mmap kvm_run");
+        perror("kvm_run: failed\n");
         exit(1);
     }
 }
@@ -105,11 +112,6 @@ void set_irqchip(struct vm *vm) {
     }
 }
 
-void error(char *message) {
-    perror(message);
-    exit(1);
-}
-
 void load_bios(void *dst) {
     int biosfd = open("../seabios/out/bios.bin", O_RDONLY);
 
@@ -145,7 +147,7 @@ void memalign(void **dst, size_t size, size_t align) {
     }
 }
 
-void set_user_memory_region(struct vm *vm, 
+void set_vm_mem(struct vm *vm, 
                             kvm_mem *memreg,
                             u64 phys_start,
                             size_t size) {
@@ -264,7 +266,7 @@ int main(int argc, char **argv) {
         error("KVM_SET_TSS_ADDR");
     }
 
-    set_user_memory_region(vm, memreg, 0, GUEST_MEMORY_SIZE);    
+    set_vm_mem(vm, memreg, 0, GUEST_MEMORY_SIZE);    
 
     load_guest_binary(vm->mem);
 
