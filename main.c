@@ -16,6 +16,7 @@
 #define ALIGNMENT_SIZE 0x1000
 #define DEFAULT_FLAGS 0x0000000000000002ULL
 #define GUEST_BINARY_SIZE (4096 * 128)
+#define IMGE_SIZE 5120000
 
 typedef uint8_t u8;
 typedef uint8_t u16;
@@ -49,6 +50,16 @@ struct blk {
     u8 status_command_reg;
     u32 index;
 };
+
+struct io {
+    __u8 direction;
+    __u8 size;
+    __u16 port;
+    __u32 count;
+    __u64 data_offset; 
+};
+
+int outfd = 0;
 
 void error(char *message) {
     perror(message);
@@ -155,9 +166,8 @@ void print_regs(struct vcpu *vcpu) {
     printf("rip: 0x%llx\n", vcpu->regs.rip);
 }
 
-void set_blk(struct blk *blk) {
-    //blk = (struct blk*)malloc(sizeof(struct blk));
-    blk->data = malloc(5120000);
+void create_blk(struct blk *blk) {
+    blk->data = malloc(IMGE_SIZE);
     blk->data_reg = 0;
     blk->drive_head_reg = 0;
     blk->lba_high_reg = 0;
@@ -166,22 +176,19 @@ void set_blk(struct blk *blk) {
     blk->sec_count_reg = 0;
     blk->status_command_reg = 0x40;
 
-
-    int blk_img_fd = open("../xv6/xv6.img", O_RDONLY);
-    if (blk_img_fd < 0) {
+    int img_fd = open("../xv6/xv6.img", O_RDONLY);
+    if (img_fd < 0) {
         perror("fail open xv6.img");
         exit(1);
     }
 
-    int read_size = 0;
     void *tmp = (void*)blk->data;
-    while(1) {
-        read_size = read(blk_img_fd, tmp, 512000);
-        if (read_size <= 0) break;
+    for(;;) {
+        int size = read(img_fd, tmp, IMGE_SIZE);
+        if (size <= 0) 
+            break;
 
-        printf("read blk: %d\n", read_size);
-
-        tmp += read_size;
+        tmp += size;
     }
 }
 
@@ -251,67 +258,150 @@ void set_tss(int fd) {
     }
 }
 
+void create_output_file() {
+    outfd = open("out.txt", O_RDWR | O_CREAT);
+}
+
+void emulate_diskr(struct blk *blk) {
+    u32 i = 0 | blk->lba_low_reg | (blk->lba_middle_reg << 8) | (blk->lba_high_reg << 16) |
+            ((blk->drive_head_reg & 0x0F) << 24);
+    blk->index = i * 512;
+}
+
+void emulate_disk_port(struct vcpu *vcpu, 
+                        struct blk *blk, struct io io) {
+    u8 val1;
+    u16 val2;
+
+    if (io.size != 4)
+        return;
+    
+    if (io.port == 0x1F0) {
+        val2 = *(u16*)((u16*)vcpu->kvm_run + io.data_offset);
+        blk->data_reg = val2;
+        return;
+    }
+
+    val1 = *(u8*)((u8*)vcpu->kvm_run + io.data_offset);
+    
+    switch (io.port) {
+    case 0x1F2:
+        blk->sec_count_reg = val1;
+        break;
+    case 0x1F3:
+        blk->lba_low_reg = val1;
+        break;            
+    case 0x1F4:
+        blk->lba_middle_reg = val1;
+        break;
+    case 0x1F5:
+        blk->lba_high_reg = val1;
+    case 0x1F6:
+        blk->drive_head_reg = val1;
+        break;
+    case 0x1F7:
+        if (val1 == 0x20) {
+            emulate_diskr(blk);
+            break;
+        }
+
+        break;
+    default:
+        break;
+    }
+}
+
+void emulate_uart_port(struct vcpu *vcpu, struct io io) {
+    if (io.port != 0x3f8) return;
+
+    for (int i = 0; i < io.count; i++) {
+        char *v = (char*)((unsigned char*)vcpu->kvm_run + io.data_offset);
+        write(outfd, v, 1);
+        io.data_offset += io.size;
+    }
+}
+
+void emulate_io_out(struct vcpu *vcpu, struct blk *blk, struct io io) {
+    switch (io.port)
+    {
+    case 0x1F0 ... 0x1F7:
+        emulate_disk_port(vcpu, blk, io);
+        break;
+    case 0x3F8:
+        emulate_uart_port(vcpu, io);
+        break;
+    default:
+        break;
+    }
+}
+
+void emulate_io(struct vcpu *vcpu, struct blk *blk) {
+    struct io io = {
+        .direction = vcpu->kvm_run->io.direction,
+        .size = vcpu->kvm_run->io.size,
+        .port = vcpu->kvm_run->io.port,
+        .count = vcpu->kvm_run->io.count,
+        .data_offset = vcpu->kvm_run->io.data_offset
+    };
+
+    switch (io.direction) {
+    case KVM_EXIT_IO_OUT:
+        printf("out: %d\n", io.port);
+        print_regs(vcpu);
+        emulate_io_out(vcpu, blk, io);
+        break;
+    case KVM_EXIT_IO_IN:
+        break;
+    default:
+        break;
+    }
+}
+
 int main(int argc, char **argv) {
     struct vm *vm = malloc(sizeof(struct vm));
     struct vcpu *vcpu = malloc(sizeof(struct vcpu));
     struct blk *blk = malloc(sizeof(struct blk));
+    struct kvm_lapic_state *lapic = malloc(sizeof(struct kvm_lapic_state));
     kvm_mem *memreg = malloc(sizeof(kvm_mem));
 
     init_kvm(vm);
     create_vm(vm);
     create_irqchip(vm->fd);
     create_pit(vm->fd);
+    create_blk(blk);
     //set_tss(vm->fd);
     set_vm_mem(vm, memreg, 0, GUEST_MEMORY_SIZE);    
     load_guest_binary(vm->mem);
     init_vcpu(vm, vcpu);
     set_regs(vcpu);
-    //set_blk(blk);
 
-    blk->data = malloc(5120000);
-    blk->data_reg = 0;
-    blk->drive_head_reg = 0;
-    blk->lba_high_reg = 0;
-    blk->lba_middle_reg = 0;
-    blk->lba_low_reg = 0;
-    blk->sec_count_reg = 0;
-    blk->status_command_reg = 0x40;
-
-    int blk_img_fd = open("../xv6/xv6.img", O_RDONLY);
-    if (blk_img_fd < 0) {
-        error("fail open xv6.img");
-    }
-
-    int read_size = 0;
-    void *tmp = (void*)blk->data;
-    while(1) {
-        read_size = read(blk_img_fd, tmp, 512000);
-        if (read_size <= 0) break;
-        tmp += read_size;
-    }
-
-     int i_in = 0;
-
-     int outfd = open("out.txt", O_RDWR);
-
-     struct kvm_lapic_state *lapic = (struct kvm_lapic_state*)malloc(sizeof(struct kvm_lapic_state));
+    create_output_file();
 
     for (;;) {
         if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
             error("KVM_RUN");
         }
 
+        struct kvm_run *run = vcpu->kvm_run;
+
+        // switch (run->exit_reason) {
+        // case KVM_EXIT_IO:
+        //     emulate_io(run, vcpu);
+        //     break;
+        // case KVM_EXIT_MMIO:
+        //     break;
+        // default:
+        //     break;
+        // }
+
+        int port = vcpu->kvm_run->io.port;
+        u32 d = 0;
+
         if (vcpu->kvm_run->exit_reason == KVM_EXIT_IO) {
-            int port = vcpu->kvm_run->io.port;
-            u32 d = 0;
 
             if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT) {
+                //emulate_io(vcpu, blk);
                 for (int i = 0; i < vcpu->kvm_run->io.count; i++) {
-                    
-                    if (port == 0x1F7) {
-                        printf("out: %u\n", port);
-                        print_regs(vcpu);
-                    }
 
                     char value = *(unsigned char *)((unsigned char *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
                     u16 val = *(u16 *)((u16 *)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
@@ -326,9 +416,10 @@ int main(int argc, char **argv) {
                         }
                         break;
                     }
-                    //print_regs(vcpu);
+                    printf("out: %d\n", vcpu->kvm_run->io.port);
+                    print_regs(vcpu);
                     handle_io_out(blk, port, value, val);
-		        }
+		       }
             } else {
                 //printf("in: %u\n", port);
                 //printf("offset: 0x%llx\n", vcpu->kvm_run->io.data_offset);
@@ -340,7 +431,6 @@ int main(int argc, char **argv) {
                     break;
                 case 0x1F0:
                     for (int i = 0; i < vcpu->kvm_run->io.count; ++i) {
-                        i_in++;
                         for (int j = 0; j < 4; j++) {
                             //printf("blk index: %d\n", blk->index);
                             d |= blk->data[blk->index] << (8 * j);
