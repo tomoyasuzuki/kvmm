@@ -214,10 +214,18 @@ void create_vm(struct vm *vm) {
     }
 }
 
-void create_pit(int fd) {
-    if (ioctl(fd, KVM_CREATE_PIT) < 0) {
-        error("KVM_CREATE_PIT");
-    }
+void create_pit(int fd, struct kvm_pit_state2 *pit) {
+    // pit channel 0 is connected directly to IRQ0
+    if (ioctl(fd, KVM_CREATE_PIT2) < 0)
+        error("KVM_CREATE_PIT2");
+
+    if (ioctl(fd, KVM_GET_PIT2, pit) < 0)
+        error("KVM_GET_PIT2");
+    
+    pit->channels[0].count = 65535;
+
+    if (ioctl(fd, KVM_SET_PIT2, pit) < 0)
+        error("KVM_SET_PIT2");
 }
 
 void set_tss(int fd) {
@@ -412,6 +420,21 @@ void debug_lapic_status(struct vcpu *vcpu, struct kvm_lapic_state *lapic) {
     printf("lapic timer: 0x%x\n", lapic->regs[200]);
 }
 
+void debug_sregs(struct vcpu *vcpu) {
+    if (ioctl(vcpu->fd, KVM_GET_SREGS, &(vcpu->sregs)) < 0)
+        error("KVM_GET_SREGS");
+    printf("apic base: 0x%llx\n", vcpu->sregs.apic_base);
+}
+
+void debug_vcpu_events(struct vcpu *vcpu, struct kvm_vcpu_events *events) {
+    if (ioctl(vcpu->fd, KVM_GET_VCPU_EVENTS, events) < 0)
+        error("KVM_GET_VCPU_EVENTS");
+    printf("interrupt.injected = 0x%x\n", events->interrupt.injected);
+    printf("interrupt.nr = 0x%x\n", events->interrupt.nr);
+    printf("interrupt.soft = 0x%x\n", events->interrupt.soft);
+    printf("interrupt.shadow = 0x%x\n", events->interrupt.shadow);
+}
+
 int main(int argc, char **argv) {
     struct vm *vm = malloc(sizeof(struct vm));
     struct vcpu *vcpu = malloc(sizeof(struct vcpu));
@@ -419,11 +442,13 @@ int main(int argc, char **argv) {
     struct kvm_lapic_state *lapic = malloc(sizeof(struct kvm_lapic_state));
     kvm_mem *memreg = malloc(sizeof(kvm_mem));
     struct kvm_irqchip *irq = malloc(sizeof(struct kvm_irqchip));
+    struct kvm_vcpu_events *events = malloc(sizeof(struct kvm_vcpu_events));
+    struct kvm_pit_state2 *pit = malloc(sizeof(struct kvm_pit_state2));
 
     init_kvm(vm);
     create_vm(vm);
     create_irqchip(vm->fd);
-    create_pit(vm->fd);
+    create_pit(vm->fd, pit);
     create_blk(blk);
     //set_tss(vm->fd);
     set_vm_mem(vm, memreg, 0, GUEST_MEMORY_SIZE);    
@@ -441,8 +466,6 @@ int main(int argc, char **argv) {
 
         switch (run->exit_reason) {
         case KVM_EXIT_IO:
-            debug_irq_status(vm, irq);
-            debug_lapic_status(vcpu, lapic);
             emulate_io(vcpu, blk);
             break;
         case KVM_EXIT_MMIO:

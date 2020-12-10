@@ -1,3 +1,5 @@
 xv6...
 cpu0: starting 0
 switch
+lapicid 0: panic: sched locks
+ 80103a9b 80103c77 801021ae 80100183 80101455 801014cf 80103634 801054e2 0 0
