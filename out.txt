@@ -1,5 +1,4 @@
 xv6...
 cpu0: starting 0
 timer!!!
-timer!!!
 switch

@@ -261,7 +261,7 @@ void set_lapicbase(struct vcpu *vcpu, struct kvm_msrs *msrs) {
 
 void set_ioapicbase(struct vm *vm, struct kvm_irqchip *irq) {
     if (ioctl(vm->fd, KVM_GET_IRQCHIP, irq) < 0)
-        error("KVM_GET_IRQCHIP at main");
+        error("KVM_GET_IRQCHIP at set_ioapicbase");
     
     if (irq->chip.ioapic.base_address == IOAPIC_BASE)
         return;
@@ -269,7 +269,7 @@ void set_ioapicbase(struct vm *vm, struct kvm_irqchip *irq) {
     irq->chip.ioapic.base_address = IOAPIC_BASE;
 
     if (ioctl(vm->fd, KVM_SET_IRQCHIP, irq) < 0)
-        error("KVM_SET_IRQCHIP at main");
+        error("KVM_SET_IRQCHIP at set_ioapicbase");
 }
 
 void emulate_diskr(struct blk *blk) {
@@ -465,6 +465,13 @@ void emulate_mmio(struct vcpu *vcpu, struct vm *vm,
     }
 }
 
+void debug_msrs(struct vcpu *vcpu, struct kvm_msrs *msrs) {
+    if (ioctl(vcpu->fd, KVM_GET_MSRS, msrs) < 0)
+        error("KVM_GET_MSRS at debug_msrs");
+    
+    printf("apic base: 0x%llx\n", msrs->entries[MSR_IA32_APICBASE].data);
+}
+
 void debug_irq_status(struct vm *vm, struct kvm_irqchip *irq) {
     if (ioctl(vm->fd, KVM_GET_IRQCHIP, irq) < 0) 
         error("KVM_GET_IRQCHIP");
@@ -484,6 +491,10 @@ void debug_lapic_status(struct vcpu *vcpu, struct kvm_lapic_state *lapic) {
 void debug_sregs(struct vcpu *vcpu) {
     if (ioctl(vcpu->fd, KVM_GET_SREGS, &(vcpu->sregs)) < 0)
         error("KVM_GET_SREGS");
+    /* 
+        vcpu->sregs.apic_base is only valid 
+        if in-kernel local APIC is not used
+    */
     printf("apic base: 0x%llx\n", vcpu->sregs.apic_base);
     printf("idt base: 0x%llx\n", vcpu->sregs.idt.base);
 }
@@ -521,7 +532,7 @@ int main(int argc, char **argv) {
     create_irqchip(vm->fd);
     create_pit(vm->fd, pit);
     create_blk(blk);
-    //set_tss(vm->fd);
+    set_tss(vm->fd);
     set_vm_mem(vm, memreg, 0, GUEST_MEMORY_SIZE);    
     load_guest_binary(vm->mem);
     init_vcpu(vm, vcpu);
@@ -541,6 +552,7 @@ int main(int argc, char **argv) {
         switch (run->exit_reason) {
         case KVM_EXIT_IO:
             debug_irq_status(vm, irq);
+            debug_msrs(vcpu, msrs);
             emulate_io(vcpu, blk);
             break;
         case KVM_EXIT_MMIO:
