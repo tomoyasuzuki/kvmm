@@ -52,6 +52,7 @@ struct blk {
     u8 drive_head_reg;
     u8 status_command_reg;
     u32 index;
+    u8 dev_conotrl_regs;
 };
 
 struct io {
@@ -71,9 +72,21 @@ struct mmio {
 
 int outfd = 0;
 
+struct vm *vm;
+struct vcpu *vcpu;
+
 void error(char *message) {
     perror(message);
     exit(1);
+}
+
+void inject_interrupt(int vcpufd, int irq) {
+    struct kvm_interrupt *intr = malloc(4096);
+    intr->irq = irq;
+    
+    
+    if (ioctl(vcpufd, KVM_INTERRUPT, intr) < 0)
+        error("KVM_INTERRUPT");
 }
 
 void init_vcpu(struct vm *vm, struct vcpu *vcpu) {
@@ -126,8 +139,33 @@ void set_regs(struct vcpu *vcpu) {
 }
 
 void create_irqchip(int fd) {
+    // struct kvm_irq_routing *rout = malloc(4096);
+    // rout->nr = 0;
+
+    // for (int i = 0; i < 15; i++) {
+    //     rout->nr++;
+    //     rout->flags = 0;
+    //     rout->entries[i].gsi = i;
+    //     rout->entries[i].type = KVM_IRQ_ROUTING_IRQCHIP;
+    //     rout->entries[i].flags = 0;
+    //     rout->entries[i].u.irqchip.irqchip = KVM_IRQ_ROUTING_IRQCHIP;
+    //     rout->entries[i].u.irqchip.pin = i; 
+    // }
+
+    // if (ioctl(fd, KVM_SET_GSI_ROUTING, rout) < 0)
+    //     error("KVM_SET_GSI_ROUTING");
+    
     if (ioctl(fd, KVM_CREATE_IRQCHIP, 0) < 0)
-        error("KVM_CREATE_IRQCHIP at create_irqchip");
+        error("KVM_CREATE_IRQCHIP");
+    
+    // for (int i = 0; i < 15; i++) {
+    //     struct kvm_irq_level *level = malloc(sizeof(struct kvm_irq_level)); 
+    //     level->irq = i;
+    //     level->level = 1;
+    //     if (ioctl(fd, KVM_IRQ_LINE, level) < 0)
+    //         error("KVM_IRQ_LINE");
+    // }
+
 }
 
 void load_guest_binary(void *dst) {
@@ -184,6 +222,7 @@ void create_blk(struct blk *blk) {
     blk->lba_low_reg = 0;
     blk->sec_count_reg = 0;
     blk->status_command_reg = 0x40;
+    blk->dev_conotrl_regs = 0; 
 
     int img_fd = open("../xv6/xv6.img", O_RDONLY);
     if (img_fd < 0) {
@@ -313,10 +352,17 @@ void emulate_disk_portw(struct vcpu *vcpu,
     case 0x1F7:
         if (val1 == 0x20) {
             emulate_diskr(blk);
-            break;
+        }
+
+        // nIEN bit is clear. interrupts is enabled.
+        if (blk->dev_conotrl_regs == 0) {
+            inject_interrupt(vcpu->fd, 3257);
+            exit(1);
         }
 
         break;
+    case 0x3F6:
+        blk->dev_conotrl_regs = val1;
     default:
         break;
     }
@@ -352,18 +398,48 @@ void emulate_uart_portw(struct vcpu *vcpu, struct io io) {
     for (int i = 0; i < io.count; i++) {
         char *v = (char*)((unsigned char*)vcpu->kvm_run + io.data_offset);
         write(outfd, v, 1);
-        io.data_offset += io.size;
+        vcpu->kvm_run->io.data_offset += io.size;
     }
 }
 
-void emulate_io_out(struct vcpu *vcpu, struct blk *blk, struct io io) {
+void emulate_pic_portw(struct vcpu *vcpu, struct io io, 
+                        struct kvm_irqchip *irq) {
+    
+    if (ioctl(vm->fd, KVM_GET_IRQCHIP, irq) < 0)
+        error("KVM_GET_IRQCHIP at emulate_pic_portw");
+
+    irq->chip.pic.init_state = *(char*)((char*)vcpu->kvm_run + io.data_offset);
+    vcpu->kvm_run->io.data_offset += io.size;
+
+    if (ioctl(vm->fd, KVM_SET_IRQCHIP, irq) < 0)
+        error("KVM_SET_IRQCHIP at emulate_pic_portw");
+    
+    if (ioctl(vm->fd, KVM_GET_IRQCHIP, irq) < 0)
+        error("KVM_GET_IRQCHIP at emulate_pic_portw");
+
+    printf("pic init_state: 0x%x\n", irq->chip.pic.init_state);
+    exit(1);
+    return;
+}
+
+void emulate_uart_portr(struct vcpu *vcpu, struct io io) {
+    
+}
+
+void emulate_io_out(struct vcpu *vcpu, struct blk *blk, 
+                    struct io io, struct kvm_irqchip *irq) {
     switch (io.port) {
     case 0x1F0 ... 0x1F7:
+        emulate_disk_portw(vcpu, blk, io);
+        break;
+    case 0x3F6:
         emulate_disk_portw(vcpu, blk, io);
         break;
     case 0x3F8:
         emulate_uart_portw(vcpu, io);
         break;
+    case 0x21:
+        emulate_pic_portw(vcpu, io, irq);
     default:
         break;
     }
@@ -374,12 +450,13 @@ void emulate_io_in(struct vcpu *vcpu, struct blk *blk, struct io io) {
     case 0x1F0 ... 0x1F7:
         emulate_disk_portr(vcpu, blk);
         break;
+    case 0x3f8 ... 0x3fd:
     default:
         break;
     }
 }
 
-void emulate_io(struct vcpu *vcpu, struct blk *blk) {
+void emulate_io(struct vcpu *vcpu, struct blk *blk, struct kvm_irqchip *irq) {
     struct io io = {
         .direction = vcpu->kvm_run->io.direction,
         .size = vcpu->kvm_run->io.size,
@@ -388,11 +465,13 @@ void emulate_io(struct vcpu *vcpu, struct blk *blk) {
         .data_offset = vcpu->kvm_run->io.data_offset
     };
 
+    printf("port: 0x%x\n", io.port);
+
     switch (io.direction) {
     case KVM_EXIT_IO_OUT:
-        //printf("out: %d\n", io.port);
+        printf("out: %d\n", io.port);
         print_regs(vcpu);
-        emulate_io_out(vcpu, blk, io);
+        emulate_io_out(vcpu, blk, io, irq);
         break;
     case KVM_EXIT_IO_IN:
         //printf("in: %d\n", io.port);
@@ -476,7 +555,11 @@ void debug_irq_status(struct vm *vm, struct kvm_irqchip *irq) {
     if (ioctl(vm->fd, KVM_GET_IRQCHIP, irq) < 0) 
         error("KVM_GET_IRQCHIP");
     //printf("irq id: 0x%x\n", irq->chip_id);
-    printf("ioapic base: 0x%llx\n", irq->chip.ioapic.base_address);
+    //printf("ioapic base: 0x%llx\n", irq->chip.ioapic.base_address);
+    for (int i = 0; i < 16; i++) {
+        printf("irq %x: derivery status 0x%x\n", 
+                irq->chip.ioapic.redirtbl[i].fields.vector, irq->chip.ioapic.redirtbl[i].fields.delivery_mode);
+    }
     //printf("ioapic id: 0x%x\n", irq->chip.ioapic.id);
     //printf("pic id: 0x%x\n", irq->chip.pic.irq_base);
 }
@@ -517,8 +600,9 @@ void debug_pit(struct vm *vm, struct kvm_pit_state2 *pit) {
 }
 
 int main(int argc, char **argv) {
-    struct vm *vm = malloc(sizeof(struct vm));
-    struct vcpu *vcpu = malloc(sizeof(struct vcpu));
+    vm = malloc(sizeof(struct vm));
+    vcpu = malloc(sizeof(struct vcpu));
+
     struct blk *blk = malloc(sizeof(struct blk));
     struct kvm_lapic_state *lapic = malloc(sizeof(struct kvm_lapic_state));
     kvm_mem *memreg = malloc(sizeof(kvm_mem));
@@ -552,8 +636,7 @@ int main(int argc, char **argv) {
         switch (run->exit_reason) {
         case KVM_EXIT_IO:
             debug_irq_status(vm, irq);
-            debug_msrs(vcpu, msrs);
-            emulate_io(vcpu, blk);
+            emulate_io(vcpu, blk, irq);
             break;
         case KVM_EXIT_MMIO:
             emulate_mmio(vcpu, vm, lapic, irq);

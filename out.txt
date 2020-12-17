@@ -2,3 +2,8 @@
 cpu0: starting 0
 timer!!!
 switch
+sb: size 0 nblocks 0 ninodes 0 nlog 0 logstart 0 inodestart 0 bmap start 0
+syscall!!!
+1 initcode: sys call 7
+lapicid 0: panic: ilock: no type
+ 80101747 80101d21 80101ef3 80100a37 80105300 801047ef 801057a5 801055af 0 0
