@@ -70,6 +70,10 @@ struct mmio {
 	__u8  is_write;
 };
 
+struct uart {
+    u8 line_status_reg;
+};
+
 int outfd = 0;
 
 struct vm *vm;
@@ -109,8 +113,7 @@ void init_vcpu(struct vm *vm, struct vcpu *vcpu) {
                         MAP_SHARED, vcpu->fd, 0);
 
     if (vcpu->kvm_run == MAP_FAILED) {
-        perror("kvm_run: failed\n");
-        exit(1);
+        error("kvm_run: failed\n");
     }
 }
 
@@ -138,7 +141,7 @@ void set_regs(struct vcpu *vcpu) {
     }
 }
 
-void create_irqchip(int fd) {
+void create_irqchip(int fd, struct kvm_irqchip *irq) {
     // struct kvm_irq_routing *rout = malloc(4096);
     // rout->nr = 0;
 
@@ -148,7 +151,7 @@ void create_irqchip(int fd) {
     //     rout->entries[i].gsi = i;
     //     rout->entries[i].type = KVM_IRQ_ROUTING_IRQCHIP;
     //     rout->entries[i].flags = 0;
-    //     rout->entries[i].u.irqchip.irqchip = KVM_IRQ_ROUTING_IRQCHIP;
+    //     rout->entries[i].u.irqchip.irqchip = KVM_IRQCHIP_IOAPIC;
     //     rout->entries[i].u.irqchip.pin = i; 
     // }
 
@@ -157,6 +160,15 @@ void create_irqchip(int fd) {
     
     if (ioctl(fd, KVM_CREATE_IRQCHIP, 0) < 0)
         error("KVM_CREATE_IRQCHIP");
+
+    if (ioctl(fd, KVM_GET_IRQCHIP, irq) < 0)
+        error("KVM_GET_IRQCHIP at create_irqchip");
+    
+    irq->chip.ioapic.base_address = IOAPIC_BASE;
+    irq->chip_id = 2;
+
+    if (ioctl(fd, KVM_SET_IRQCHIP, irq) < 0)
+        error("KVM_SET_LAPIC at create_irqchip");
     
     // for (int i = 0; i < 15; i++) {
     //     struct kvm_irq_level *level = malloc(sizeof(struct kvm_irq_level)); 
@@ -245,6 +257,8 @@ void init_kvm(struct vm *vm) {
     if (vm->vm_fd < 0) { 
         error("open /dev/kvm");
     }
+
+    printf("vm");
 }
 
 void create_vm(struct vm *vm) {
@@ -327,14 +341,21 @@ void emulate_disk_portw(struct vcpu *vcpu,
         //return;
     
     if (io.port == 0x1F0) {
-        val2 = *(u16*)((u16*)vcpu->kvm_run + io.data_offset);
-        blk->data_reg = val2;
+        print_regs(vcpu);
+        printf("io size %d count %d\n", io.size, io.count);
+        for (int i = 0; i < io.count; i++) {
+            val1 = *(u8*)((u8*)vcpu->kvm_run + io.data_offset);
+            blk->data[blk->index] = val1;
+            vcpu->kvm_run->io.data_offset += io.size;
+            blk->index += 1;
+        }
         return;
     }
 
     val1 = *(u8*)((u8*)vcpu->kvm_run + io.data_offset);
     
     switch (io.port) {
+        break;
     case 0x1F2:
         blk->sec_count_reg = val1;
         break;
@@ -355,10 +376,10 @@ void emulate_disk_portw(struct vcpu *vcpu,
         }
 
         // nIEN bit is clear. interrupts is enabled.
-        if (blk->dev_conotrl_regs == 0) {
-            inject_interrupt(vcpu->fd, 3257);
-            exit(1);
-        }
+        // if (blk->dev_conotrl_regs == 0) {
+        //     inject_interrupt(vcpu->fd, 3257);
+        //     exit(1);
+        // }
 
         break;
     case 0x3F6:
@@ -393,12 +414,28 @@ void emulate_disk_portr(struct vcpu *vcpu,
 }
 
 void emulate_uart_portw(struct vcpu *vcpu, struct io io) {
-    if (io.port != 0x3f8) return;
+    switch (io.port) {
+    case 0x3f8:
+        for (int i = 0; i < io.count; i++) {
+            char *v = (char*)((unsigned char*)vcpu->kvm_run + io.data_offset);
+            write(outfd, v, 1);
+            vcpu->kvm_run->io.data_offset += io.size;
+        }
+        break;
+    default:
+        break;
+    }
+}
 
-    for (int i = 0; i < io.count; i++) {
-        char *v = (char*)((unsigned char*)vcpu->kvm_run + io.data_offset);
-        write(outfd, v, 1);
-        vcpu->kvm_run->io.data_offset += io.size;
+void emulate_uart_portr(struct vcpu *vcpu, struct io io) {
+    switch (io.port)
+    {
+    case 0x3fd:
+        *(unsigned char*)((unsigned char*)vcpu->kvm_run
+         + vcpu->kvm_run->io.data_offset) = 0; 
+        break;
+    default:
+        break;
     }
 }
 
@@ -420,10 +457,6 @@ void emulate_pic_portw(struct vcpu *vcpu, struct io io,
     printf("pic init_state: 0x%x\n", irq->chip.pic.init_state);
     exit(1);
     return;
-}
-
-void emulate_uart_portr(struct vcpu *vcpu, struct io io) {
-    
 }
 
 void emulate_io_out(struct vcpu *vcpu, struct blk *blk, 
@@ -465,7 +498,7 @@ void emulate_io(struct vcpu *vcpu, struct blk *blk, struct kvm_irqchip *irq) {
         .data_offset = vcpu->kvm_run->io.data_offset
     };
 
-    printf("port: 0x%x\n", io.port);
+    //printf("port: 0x%x\n", io.port);
 
     switch (io.direction) {
     case KVM_EXIT_IO_OUT:
@@ -474,7 +507,7 @@ void emulate_io(struct vcpu *vcpu, struct blk *blk, struct kvm_irqchip *irq) {
         emulate_io_out(vcpu, blk, io, irq);
         break;
     case KVM_EXIT_IO_IN:
-        //printf("in: %d\n", io.port);
+        printf("in: %d\n", io.port);
         print_regs(vcpu);
         emulate_io_in(vcpu, blk, io);
         break;
@@ -527,9 +560,6 @@ void emulate_mmio(struct vcpu *vcpu, struct vm *vm,
         .phys_addr = vcpu->kvm_run->mmio.phys_addr
     };
 
-    printf("phys 0x%llx\n", mmio.phys_addr);
-    exit(1);
-
     /* 
         because kvm handle mmio access internally, 
         this function should not be called accessing lapic or ioapic.  
@@ -555,13 +585,20 @@ void debug_irq_status(struct vm *vm, struct kvm_irqchip *irq) {
     if (ioctl(vm->fd, KVM_GET_IRQCHIP, irq) < 0) 
         error("KVM_GET_IRQCHIP");
     //printf("irq id: 0x%x\n", irq->chip_id);
-    //printf("ioapic base: 0x%llx\n", irq->chip.ioapic.base_address);
-    for (int i = 0; i < 16; i++) {
-        printf("irq %x: derivery status 0x%x\n", 
-                irq->chip.ioapic.redirtbl[i].fields.vector, irq->chip.ioapic.redirtbl[i].fields.delivery_mode);
+    printf("ioapic base: 0x%llx\n", irq->chip.ioapic.base_address);
+
+    irq->chip.ioapic.base_address = IOAPIC_BASE;
+    irq->chip_id = 2;
+
+    if (ioctl(vm->fd, KVM_SET_IRQCHIP, irq) < 0)
+        error("KVM_SET_IRQCHIP at debug_irq_status");
+    for (int i = 0; irq->chip.ioapic.redirtbl[i].bits; i++) {
+        printf("irq %d: derivery status 0x%x\n", 
+                irq->chip.ioapic.redirtbl[i].fields.vector, 
+                irq->chip.ioapic.redirtbl[i].fields.delivery_mode);
     }
     //printf("ioapic id: 0x%x\n", irq->chip.ioapic.id);
-    //printf("pic id: 0x%x\n", irq->chip.pic.irq_base);
+    //printf("pic id: 0x%x\n", irq->chip.pic.id);
 }
 
 void debug_lapic_status(struct vcpu *vcpu, struct kvm_lapic_state *lapic) {
@@ -611,9 +648,11 @@ int main(int argc, char **argv) {
     struct kvm_pit_state2 *pit = malloc(sizeof(struct kvm_pit_state2));
     struct kvm_msrs *msrs = malloc(sizeof(struct kvm_msrs));
 
+    printf("hoge");
+
     init_kvm(vm);
     create_vm(vm);
-    create_irqchip(vm->fd);
+    create_irqchip(vm->fd, irq);
     create_pit(vm->fd, pit);
     create_blk(blk);
     set_tss(vm->fd);
@@ -631,11 +670,13 @@ int main(int argc, char **argv) {
             print_regs(vcpu);
         }
 
+        printf("run");
+
         struct kvm_run *run = vcpu->kvm_run;
 
         switch (run->exit_reason) {
         case KVM_EXIT_IO:
-            debug_irq_status(vm, irq);
+            print_regs(vcpu);
             emulate_io(vcpu, blk, irq);
             break;
         case KVM_EXIT_MMIO:
