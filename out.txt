@@ -1,7 +1,9 @@
 xv6...
 cpu0: starting 0
-timer!!!
 switch
-sb: size 1179403647 nblocks 65793 ninodes 0 nlog 0 logstart 196610 inodestart 1 bmap start 1048588
+!
+eoi!!!
+switch
+e 1179403647 nblocks 65793 ninodes 0 nlog 0 logstart 196610 inodestart 1 bmap start 1048588
 lapicid 0: panic: incorrect blockno
  80101fe5 801021b7 80100183 80102b55 80103730 801055f2 0 0 0 0
