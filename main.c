@@ -72,7 +72,14 @@ struct mmio {
 };
 
 struct uart {
+    u8 data_reg;
+    u8 irr_enable_reg;
+    u8 irr_id_reg;
+    u8 line_control_reg;
+    u8 modem_control_reg;
     u8 line_status_reg;
+    u8 modem_status_reg;
+    u8 scratch_reg;
 };
 
 union redirtb_entry {
@@ -116,6 +123,7 @@ int outfd = 0;
 
 struct vm *vm;
 struct vcpu *vcpu;
+struct lapic *lapic;
 
 void enq_irr(struct irr_queue *irr, int value) {
     irr->arr[irr->last] = value;
@@ -322,6 +330,17 @@ void create_pit(int fd, struct kvm_pit_state2 *pit) {
         error("KVM_SET_PIT2");
 }
 
+void create_uart(struct uart *uart) {
+    uart->data_reg = 0;
+    uart->irr_enable_reg = 0;
+    uart->irr_id_reg = 0;
+    uart->line_control_reg = 0;
+    uart->modem_control_reg = 0;
+    uart->line_status_reg = 0;
+    uart->modem_status_reg = 0;
+    uart->scratch_reg = 0;
+}
+
 void set_tss(int fd) {
     if (ioctl(fd, KVM_SET_TSS_ADDR, 0xfffbd000) < 0) {
         error("KVM_SET_TSS_ADDR");
@@ -385,12 +404,11 @@ void emulate_disk_portw(struct vcpu *vcpu,
             blk->index += 1;
         }
 
-        // //nIEN bit is clear. interrupts is enabled.
-        // if (blk->dev_conotrl_regs == 0 && vcpu->kvm_run->ready_for_interrupt_injection) {
-        //     inject_interrupt(vcpu->fd, 14);
-        // } else {
-        //     vcpu->kvm_run->request_interrupt_window = 1;
-        // }
+        if (blk->dev_conotrl_regs == 0 && vcpu->kvm_run->ready_for_interrupt_injection) {
+            enq_irr(lapic->irr,32+14);
+        } else {
+            vcpu->kvm_run->request_interrupt_window = 1;         
+        }
 
         return;
     }
@@ -419,12 +437,11 @@ void emulate_disk_portw(struct vcpu *vcpu,
         }
 
         // //nIEN bit is clear. interrupts is enabled.
-        // if (blk->dev_conotrl_regs == 0 && vcpu->kvm_run->ready_for_interrupt_injection) {
-        //     inject_interrupt(vcpu->fd, 14);
-        // } else {
-        //     vcpu->kvm_run->request_interrupt_window = 1;
-            
-        // }
+        if (blk->dev_conotrl_regs == 0 && vcpu->kvm_run->ready_for_interrupt_injection) {
+            enq_irr(lapic->irr,32+14);
+        } else {
+            vcpu->kvm_run->request_interrupt_window = 1;
+        }
 
         break;
     case 0x3F6:
@@ -456,32 +473,58 @@ void emulate_disk_portr(struct vcpu *vcpu,
     default:
         break;
     }
+
+    if (blk->dev_conotrl_regs == 0 && vcpu->kvm_run->ready_for_interrupt_injection) {
+        enq_irr(lapic->irr,32+14);
+    } else {
+        vcpu->kvm_run->request_interrupt_window = 1;
+    }
 }
 
-void emulate_uart_portw(struct vcpu *vcpu, struct io io) {
+void emulate_uart_portw(struct vcpu *vcpu, struct io io, struct uart *uart) {
     switch (io.port) {
     case 0x3f8:
         for (int i = 0; i < io.count; i++) {
             char *v = (char*)((unsigned char*)vcpu->kvm_run + io.data_offset);
             write(outfd, v, 1);
+            uart->data_reg = *v;
             vcpu->kvm_run->io.data_offset += io.size;
         }
+        uart->line_status_reg |= (1<<0);
+        break;
+    case 0x3f9:
+        uart->irr_enable_reg = *(u8*)((u8*)vcpu->kvm_run
+         + vcpu->kvm_run->io.data_offset);
+    case 0x3fd:
+        uart->line_status_reg = *(u8*)((u8*)vcpu->kvm_run
+         + vcpu->kvm_run->io.data_offset);
         break;
     default:
         break;
     }
+
+    if (uart->irr_enable_reg) 
+        enq_irr(lapic->irr, 32+4);
 }
 
-void emulate_uart_portr(struct vcpu *vcpu, struct io io) {
+void emulate_uart_portr(struct vcpu *vcpu, struct io io, struct uart *uart) {
     switch (io.port)
     {
+    case 0x3f8:
+        *(unsigned char*)((unsigned char*)vcpu->kvm_run
+         + vcpu->kvm_run->io.data_offset) = uart->data_reg; 
+        uart->line_status_reg &= ~(1<<0);
+        break;
     case 0x3fd:
         *(unsigned char*)((unsigned char*)vcpu->kvm_run
-         + vcpu->kvm_run->io.data_offset) = 0; 
+         + vcpu->kvm_run->io.data_offset) = uart->line_status_reg; 
         break;
     default:
         break;
     }
+
+    if (uart->irr_enable_reg) 
+        enq_irr(lapic->irr, 32+4);
 }
 
 void emulate_pic_portw(struct vcpu *vcpu, struct io io, 
@@ -505,7 +548,7 @@ void emulate_pic_portw(struct vcpu *vcpu, struct io io,
 }
 
 void emulate_io_out(struct vcpu *vcpu, struct blk *blk, 
-                    struct io io) {
+                    struct io io, struct uart *uart) {
     switch (io.port) {
     case 0x1F0 ... 0x1F7:
         emulate_disk_portw(vcpu, blk, io);
@@ -513,26 +556,28 @@ void emulate_io_out(struct vcpu *vcpu, struct blk *blk,
     case 0x3F6:
         emulate_disk_portw(vcpu, blk, io);
         break;
-    case 0x3F8:
-        emulate_uart_portw(vcpu, io);
+    case 0x3F8 ... 0x3FD:
+        emulate_uart_portw(vcpu, io, uart);
         break;
     default:
         break;
     }
 }
 
-void emulate_io_in(struct vcpu *vcpu, struct blk *blk, struct io io) {
+void emulate_io_in(struct vcpu *vcpu, struct blk *blk, 
+                   struct io io, struct uart *uart) {
     switch (io.port) {
     case 0x1F0 ... 0x1F7:
         emulate_disk_portr(vcpu, blk);
         break;
     case 0x3f8 ... 0x3fd:
+        emulate_uart_portr(vcpu, io, uart);
     default:
         break;
     }
 }
 
-void emulate_io(struct vcpu *vcpu, struct blk *blk) {
+void emulate_io(struct vcpu *vcpu, struct blk *blk, struct uart *uart) {
     struct io io = {
         .direction = vcpu->kvm_run->io.direction,
         .size = vcpu->kvm_run->io.size,
@@ -547,12 +592,12 @@ void emulate_io(struct vcpu *vcpu, struct blk *blk) {
     case KVM_EXIT_IO_OUT:
         //printf("out: %d\n", io.port);
         //print_regs(vcpu);
-        emulate_io_out(vcpu, blk, io);
+        emulate_io_out(vcpu, blk, io, uart);
         break;
     case KVM_EXIT_IO_IN:
         //printf("in: %d\n", io.port);
         //print_regs(vcpu);
-        emulate_io_in(vcpu, blk, io);
+        emulate_io_in(vcpu, blk, io, uart);
         break;
     default:
         printf("exit reason: %d\n", vcpu->kvm_run->exit_reason);
@@ -565,21 +610,14 @@ void emulate_lapicw(struct vcpu *vcpu, struct lapic *lapic) {
     int index = vcpu->kvm_run->mmio.phys_addr - LAPIC_BASE;
     u32 data = 0;
 
-    // if (ioctl(vcpu->fd, KVM_GET_LAPIC, lapic) < 0) {
-    //     error("KVM_GET_LAPIC");
-    // }
-
     for (int i = 0; i < 4; i++) {
         data |= vcpu->kvm_run->mmio.data[i] << i*8;
     }
 
-    printf("lapic index=%d, val=%d\n", index/4, data);
+    //printf("lapic offset=%d, val=%d\n", index/4, data);
 
-    lapic->regs[index/4] = data;
-    
-    // if (ioctl(vcpu->fd, KVM_SET_LAPIC, lapic) < 0) {
-    //     error("KVM_SET_LAPIC");
-    // }
+    if (vcpu->kvm_run->mmio.is_write)
+        lapic->regs[index/4] = data;
 }
 
 /*
@@ -660,8 +698,6 @@ void debug_irq_status(struct vm *vm, struct kvm_irqchip *irq) {
                 irq->chip.ioapic.redirtbl[i].fields.vector, 
                 irq->chip.ioapic.redirtbl[i].fields.delivery_mode);
     }
-    //printf("ioapic id: 0x%x\n", irq->chip.ioapic.id);
-    //printf("pic id: 0x%x\n", irq->chip.pic.id);
 }
 
 void debug_lapic_status(struct vcpu *vcpu, struct kvm_lapic_state *lapic) {
@@ -703,17 +739,16 @@ void debug_pit(struct vm *vm, struct kvm_pit_state2 *pit) {
 int main(int argc, char **argv) {
     vm = malloc(sizeof(struct vm));
     vcpu = malloc(sizeof(struct vcpu));
-
-    struct blk *blk = malloc(sizeof(struct blk));
-    //struct kvm_lapic_state *lapic = malloc(sizeof(struct kvm_lapic_state));
-    struct lapic *lapic = malloc(sizeof(struct lapic));
+    lapic = malloc(sizeof(struct lapic));
     lapic->irr = malloc(4 * 4096);
+
     kvm_mem *memreg = malloc(sizeof(kvm_mem));
-    //struct kvm_irqchip *irq = malloc(sizeof(struct kvm_irqchip));
+    struct blk *blk = malloc(sizeof(struct blk));
     struct kvm_vcpu_events *events = malloc(sizeof(struct kvm_vcpu_events));
     struct kvm_pit_state2 *pit = malloc(sizeof(struct kvm_pit_state2));
     struct kvm_msrs *msrs = malloc(sizeof(struct kvm_msrs));
     struct ioapic *ioapic = malloc(sizeof(struct ioapic));
+    struct uart *uart = malloc(sizeof(struct uart));
 
     init_kvm(vm);
     create_vm(vm);
@@ -722,40 +757,48 @@ int main(int argc, char **argv) {
     set_tss(vm->fd);
     set_vm_mem(vm, memreg, 0, GUEST_MEMORY_SIZE);    
     load_guest_binary(vm->mem);
-    //create_lapic(lapic);
     init_vcpu(vm, vcpu);
     set_regs(vcpu);
-   //set_ioapicbase(vm, irq);
+    create_uart(uart);
     create_output_file();
 
     for (;;) {
         if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
-            error("KVM_RUN");
             print_regs(vcpu);
+            error("KVM_RUN");
         }
 
         struct kvm_run *run = vcpu->kvm_run;
 
-        // if (run->ready_for_interrupt_injection) {
-        //     inject_interrupt(vcpu->fd, pending_intrrupts[0]);
+        // if (vcpu->kvm_run->ready_for_interrupt_injection && lapic->irr->arr[0]) {
+        //     inject_interrupt(vcpu->fd, lapic->irr->arr[0]);
+        //     deq_irr(lapic->irr);
+        // } else {
+        //     /* KVM_RUN return when it becomes possible
+        //     to inject external interrupts */
+        //     vcpu->kvm_run->request_interrupt_window = 1;
         // }
+
+        int i = 0;
 
         switch (run->exit_reason) {
         case KVM_EXIT_IO:
-            //print_regs(vcpu);
-            //debug_lapic_status(vcpu, lapic);
-            //set_lapicbase(vcpu, msrs);
-            emulate_io(vcpu, blk);
+            print_regs(vcpu);
+            emulate_io(vcpu, blk, uart);
+            if (i / 10 == 0)
+                enq_irr(lapic->irr, 32+0);
+            i++;
             break;
         case KVM_EXIT_MMIO:
             emulate_mmio(vcpu, vm, lapic, ioapic);
             break;
         case KVM_EXIT_EXCEPTION:
             printf("exception\n");
-            exit(1);
-        case KVM_EXIT_IOAPIC_EOI:
-            printf("eoi\n");
-            exit(1);
+        case KVM_EXIT_IRQ_WINDOW_OPEN:
+            inject_interrupt(vcpu->fd, lapic->irr->arr[0]);
+            deq_irr(lapic->irr);
+            vcpu->kvm_run->request_interrupt_window = 0;
+            break;
         default:
             printf("exit reason: %d\n", vcpu->kvm_run->exit_reason);
             break;
