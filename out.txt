@@ -1,3 +1,6 @@
 xv6...
+memmove
+memmove
 cpu0: starting 0
-switch
+lapicid 0: panic: acquire
+ 80104421 80100815 80100866 80105b30 80105905 801056af 80102f1f 8010305f 0 0
