@@ -280,7 +280,7 @@ void create_blk(struct blk *blk) {
     blk->lba_low_reg = 0;
     blk->sec_count_reg = 0;
     blk->status_command_reg = 0x40;
-    blk->dev_conotrl_regs = 1; 
+    blk->dev_conotrl_regs = 0; 
 
     int img_fd = open("../xv6/xv6.img", O_RDONLY);
     if (img_fd < 0) {
