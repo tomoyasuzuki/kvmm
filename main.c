@@ -396,17 +396,12 @@ void emulate_disk_portw(struct vcpu *vcpu,
         //return;
     
     if (io.port == 0x1F0) {
-        print_regs(vcpu);
-        printf("io size %d count %d\n", io.size, io.count);
         for (int i = 0; i < io.count; i++) {
             val1 = *(u8*)((u8*)vcpu->kvm_run + io.data_offset);
             blk->data[blk->index] = val1;
             vcpu->kvm_run->io.data_offset += io.size;
             blk->index += 1;
         }
-
-        printf("dev_control_regs: 0x%x\n", blk->dev_conotrl_regs);
-        printf("irr ready: %d\n ", vcpu->kvm_run->ready_for_interrupt_injection);
 
         if (blk->dev_conotrl_regs == 0) {
             enq_irr(lapic->irr,32+14);
@@ -438,13 +433,12 @@ void emulate_disk_portw(struct vcpu *vcpu,
     case 0x1F7:
         if (val1 == 0x20) {
             emulate_diskr(blk);
-        }
 
-        // //nIEN bit is clear. interrupts is enabled.
-        if (blk->dev_conotrl_regs == 0) {
-            enq_irr(lapic->irr,32+14);
-        } else {
-            vcpu->kvm_run->request_interrupt_window = 1;
+            if (blk->dev_conotrl_regs == 0) {
+                enq_irr(lapic->irr,32+14);
+            } else {
+                vcpu->kvm_run->request_interrupt_window = 1;
+            }
         }
 
         break;
@@ -477,12 +471,6 @@ void emulate_disk_portr(struct vcpu *vcpu,
     default:
         break;
     }
-
-    if (blk->dev_conotrl_regs == 0) {
-        enq_irr(lapic->irr,32+14);
-    } else {
-        vcpu->kvm_run->request_interrupt_window = 1;
-    }
 }
 
 void emulate_uart_portw(struct vcpu *vcpu, struct io io, struct uart *uart) {
@@ -494,7 +482,9 @@ void emulate_uart_portw(struct vcpu *vcpu, struct io io, struct uart *uart) {
             uart->data_reg = *v;
             vcpu->kvm_run->io.data_offset += io.size;
         }
-        uart->line_status_reg |= (1<<0);
+        //uart->line_status_reg |= (1<<0);
+        //if (uart->irr_enable_reg) 
+            //enq_irr(lapic->irr, 32+4);
         break;
     case 0x3f9:
         uart->irr_enable_reg = *(u8*)((u8*)vcpu->kvm_run
@@ -514,9 +504,9 @@ void emulate_uart_portr(struct vcpu *vcpu, struct io io, struct uart *uart) {
     case 0x3f8:
         *(unsigned char*)((unsigned char*)vcpu->kvm_run
          + vcpu->kvm_run->io.data_offset) = uart->data_reg; 
-        uart->line_status_reg &= ~(1<<0);
-        // if (uart->irr_enable_reg) 
-        //     enq_irr(lapic->irr, 32+4);
+        //uart->line_status_reg &= ~(1<<0);
+        //if (uart->irr_enable_reg == 0xff) 
+            //enq_irr(lapic->irr, 32+4);
         break;
     case 0x3fd:
         *(unsigned char*)((unsigned char*)vcpu->kvm_run
@@ -773,24 +763,14 @@ int main(int argc, char **argv) {
 
         struct kvm_run *run = vcpu->kvm_run;
 
-        // if (vcpu->kvm_run->ready_for_interrupt_injection && lapic->irr->arr[0]) {
-        //     inject_interrupt(vcpu->fd, lapic->irr->arr[0]);
-        //     printf("inject %d\n", lapic->irr->arr[0]);
-        //     deq_irr(lapic->irr);
-        // } else {
-        //     /* KVM_RUN return when it becomes possible
-        //     to inject external interrupts */
-        //     vcpu->kvm_run->request_interrupt_window = 1;
-        // }
-
         int i = 0;
 
         switch (run->exit_reason) {
         case KVM_EXIT_IO:
             print_regs(vcpu);
             emulate_io(vcpu, blk, uart);
-            //if (i / 1000 == 0)
-                //enq_irr(lapic->irr, 32+0);
+            // if (i / 1000 == 0)
+            //     enq_irr(lapic->irr, 32+0);
             i++;
             break;
         case KVM_EXIT_MMIO:
@@ -799,14 +779,10 @@ int main(int argc, char **argv) {
         case KVM_EXIT_EXCEPTION:
             printf("exception\n");
         case KVM_EXIT_IRQ_WINDOW_OPEN:
-            if (lapic->irr->arr[0] < 32) {
+            if (lapic->irr->arr[0] > 32) {
+                inject_interrupt(vcpu->fd, lapic->irr->arr[0]);
+                printf("inject %d\n", lapic->irr->arr[0]);
                 deq_irr(lapic->irr);
-                break;
-            }
-            inject_interrupt(vcpu->fd, lapic->irr->arr[0]);
-            printf("inject %d\n", lapic->irr->arr[0]);
-            deq_irr(lapic->irr);
-            if (lapic->irr->arr[0] < 32) {
                 vcpu->kvm_run->request_interrupt_window = 0;
             }
             break;
