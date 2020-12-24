@@ -1,7 +1,9 @@
 xv6...
+idewait
 memmove
 memmove
 cpu0: starting 0
+ideintr
 switch
 iinit
 readsb
@@ -9,5 +11,26 @@ bread
 bget
 iderw
 idestart
+idewait
 read
 sleep
+ideintr
+idewait
+wakeup
+switch
+wakeup
+memmove
+wakeup
+sb: size 1179403647 nblocks 65793 ninodes 0 nlog 0 logstart 196610 inodestart 1 bmap start 1048588
+initlog
+readsb
+bread
+bget
+memmove
+wakeup
+bread
+bget
+iderw
+idestart
+lapicid 0: panic: incorrect blockno
+ 8010206d 801022a7 801001a3 80102c11 801037f0 801056f2 0 0 0 0

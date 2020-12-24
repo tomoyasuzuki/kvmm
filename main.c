@@ -403,11 +403,11 @@ void emulate_disk_portw(struct vcpu *vcpu,
             blk->index += 1;
         }
 
-        if (blk->dev_conotrl_regs == 0) {
-            enq_irr(lapic->irr,32+14);
-        } else {
-            vcpu->kvm_run->request_interrupt_window = 1;         
-        }
+        // if (blk->dev_conotrl_regs == 0) {
+        //     enq_irr(lapic->irr,32+14);
+        // } else {
+        //     vcpu->kvm_run->request_interrupt_window = 1;         
+        // }
 
         return;
     }
@@ -436,7 +436,6 @@ void emulate_disk_portw(struct vcpu *vcpu,
 
             if (blk->dev_conotrl_regs == 0) {
                 enq_irr(lapic->irr,32+14);
-            } else {
                 vcpu->kvm_run->request_interrupt_window = 1;
             }
         }
@@ -731,9 +730,6 @@ int main(int argc, char **argv) {
     vcpu = malloc(sizeof(struct vcpu));
     lapic = malloc(sizeof(struct lapic));
     lapic->irr = malloc(4 * 4096);
-    for (int j = 0; j < 1000; j++) {
-        lapic->irr->arr[j] = -1;
-    }
 
     kvm_mem *memreg = malloc(sizeof(kvm_mem));
     struct blk *blk = malloc(sizeof(struct blk));
@@ -779,7 +775,7 @@ int main(int argc, char **argv) {
         case KVM_EXIT_EXCEPTION:
             printf("exception\n");
         case KVM_EXIT_IRQ_WINDOW_OPEN:
-            if (lapic->irr->arr[0] > 32) {
+            if (lapic->irr->arr[0] >= 32) {
                 inject_interrupt(vcpu->fd, lapic->irr->arr[0]);
                 printf("inject %d\n", lapic->irr->arr[0]);
                 deq_irr(lapic->irr);
