@@ -400,14 +400,16 @@ void set_ioapicbase(struct vm *vm, struct kvm_irqchip *irq) {
         error("KVM_SET_IRQCHIP at set_ioapicbase");
 }
 
-void emulate_diskr(struct blk *blk) {
-    // u32 i = 0 | blk->lba_low_reg | (blk->lba_middle_reg << 8) | (blk->lba_high_reg << 16) |
-    //         ((blk->drive_head_reg & 0x0F) << 24);
-    u32 i = 0 | blk->lba_low_reg | (blk->lba_middle_reg << 8) | (blk->lba_high_reg << 16);
-
-    blk->index = i * 512; // sector index
-    if (blk->drive_head_reg == 0xf0) {
-        blk->index += IMGE_SIZE;
+void emulate_diskr(struct vcpu *vcpu, struct blk *blk) {
+    u32 data = 0;
+    for (int i = 0; i < vcpu->kvm_run->io.count; ++i) {
+        for (int j = 0; j < 4; j++) {
+            data |= blk->data[blk->index] << (8 * j);
+            blk->index += 1;
+        }
+        *(u32*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset) = data;
+        vcpu->kvm_run->io.data_offset += vcpu->kvm_run->io.size;
+        data = 0;
     }
 }
 
@@ -475,15 +477,7 @@ void emulate_disk_portr(struct vcpu *vcpu,
 
     switch (vcpu->kvm_run->io.port) {
     case 0x1F0:
-        for (int i = 0; i < vcpu->kvm_run->io.count; ++i) {
-            for (int j = 0; j < 4; j++) {
-                data |= blk->data[blk->index] << (8 * j);
-                blk->index += 1;
-            }
-            *(u32*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset) = data;
-            vcpu->kvm_run->io.data_offset += vcpu->kvm_run->io.size;
-            data = 0;
-        }
+        emulate_diskr(vcpu, blk);
         break;
     case 0x1F7:
          *(unsigned char*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset) = blk->status_command_reg; 
