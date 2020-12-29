@@ -17,6 +17,7 @@
 #define DEFAULT_FLAGS 0x0000000000000002ULL
 #define GUEST_BINARY_SIZE (4096 * 128)
 #define IMGE_SIZE 5120000
+#define FS_IMAGE_SIZE (500 * 1024)
 #define LAPIC_BASE 0xfee00000
 #define IOAPIC_BASE 0xfec00000
 #define IOAPIC_REDRTB_BASE (IOAPIC_BASE + 0x10)
@@ -272,7 +273,7 @@ void print_regs(struct vcpu *vcpu) {
 }
 
 void create_blk(struct blk *blk) {
-    blk->data = malloc(IMGE_SIZE);
+    blk->data = malloc(IMGE_SIZE * 100);
     blk->data_reg = 0;
     blk->drive_head_reg = 0;
     blk->lba_high_reg = 0;
@@ -280,22 +281,41 @@ void create_blk(struct blk *blk) {
     blk->lba_low_reg = 0;
     blk->sec_count_reg = 0;
     blk->status_command_reg = 0x40;
-    blk->dev_conotrl_regs = 0; 
+    blk->dev_conotrl_regs = 0;
 
     int img_fd = open("../xv6/xv6.img", O_RDONLY);
-    if (img_fd < 0) {
-        perror("fail open xv6.img");
-        exit(1);
-    }
+    if (img_fd < 0)
+        error("faile open xv6.img");
 
-    void *tmp = (void*)blk->data;
+    void *dst = (void*)blk->data;
     for(;;) {
-        int size = read(img_fd, tmp, IMGE_SIZE);
+        int size = read(img_fd, dst, IMGE_SIZE);
         if (size <= 0) 
             break;
 
-        tmp += size;
+        dst += size;
     }
+
+    dst = (void*)blk->data+IMGE_SIZE;
+
+    int fs_fd = open("../xv6/fs.img", O_RDONLY);
+    if (fs_fd < 0)
+        error("faile oepn fs.img\n");
+    
+    for(;;) {
+        int sizef = read(fs_fd, dst, FS_IMAGE_SIZE);
+        if (sizef <= 0) {
+            break;
+        }
+
+        dst += sizef;
+    }
+
+    int tmpfd = open("tmp", O_RDWR | O_CREAT);
+    if (tmpfd < 0)
+        error("tmpfd");
+    if (write(tmpfd, (void*)(blk->data+IMGE_SIZE), FS_IMAGE_SIZE) < 0)
+        perror("write");
 }
 
 void init_kvm(struct vm *vm) {
@@ -381,9 +401,15 @@ void set_ioapicbase(struct vm *vm, struct kvm_irqchip *irq) {
 }
 
 void emulate_diskr(struct blk *blk) {
-    u32 i = 0 | blk->lba_low_reg | (blk->lba_middle_reg << 8) | (blk->lba_high_reg << 16) |
-            ((blk->drive_head_reg & 0x0F) << 24);
-    blk->index = i * 512;
+    // u32 i = 0 | blk->lba_low_reg | (blk->lba_middle_reg << 8) | (blk->lba_high_reg << 16) |
+    //         ((blk->drive_head_reg & 0x0F) << 24);
+    u32 i = 0 | blk->lba_low_reg | (blk->lba_middle_reg << 8) | (blk->lba_high_reg << 16);
+
+    printf("index: 0x%x\n", blk->drive_head_reg);
+    blk->index = i * 512; // sector index
+    if (blk->drive_head_reg == 0xf0) {
+        blk->index += IMGE_SIZE;
+    }
 }
 
 void emulate_disk_portw(struct vcpu *vcpu, 
