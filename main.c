@@ -422,6 +422,7 @@ void emulate_disk_portw(struct vcpu *vcpu,
         //return;
     
     if (io.port == 0x1F0) {
+        printf("size=%d\n", io.size);
         for (int i = 0; i < io.count; i++) {
             val1 = *(u8*)((u8*)vcpu->kvm_run + io.data_offset);
             blk->data[blk->index] = val1;
@@ -429,11 +430,10 @@ void emulate_disk_portw(struct vcpu *vcpu,
             blk->index += 1;
         }
 
-        // if (blk->dev_conotrl_regs == 0) {
-        //     enq_irr(lapic->irr,32+14);
-        // } else {
-        //     vcpu->kvm_run->request_interrupt_window = 1;         
-        // }
+        if (blk->dev_conotrl_regs == 0) {
+            enq_irr(lapic->irr,32+14);
+            vcpu->kvm_run->request_interrupt_window = 1;
+        }
 
         return;
     }
