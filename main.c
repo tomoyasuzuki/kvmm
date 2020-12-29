@@ -405,8 +405,25 @@ void emulate_diskr(struct blk *blk) {
     //         ((blk->drive_head_reg & 0x0F) << 24);
     u32 i = 0 | blk->lba_low_reg | (blk->lba_middle_reg << 8) | (blk->lba_high_reg << 16);
 
-    printf("index: 0x%x\n", blk->drive_head_reg);
     blk->index = i * 512; // sector index
+    if (blk->drive_head_reg == 0xf0) {
+        blk->index += IMGE_SIZE;
+    }
+}
+
+void emulate_diskw(struct vcpu *vcpu, 
+                   struct blk *blk, struct io io) {
+    for (int i = 0; i < io.count; i++) {
+        u32 val4 = *(u32*)((u32*)vcpu->kvm_run + io.data_offset);
+        blk->data[blk->index] = val4;
+        vcpu->kvm_run->io.data_offset += io.size;
+        blk->index += io.size;
+    }
+}
+
+void update_blk_index(struct blk *blk) {
+    u32 index = 0 | blk->lba_low_reg | (blk->lba_middle_reg << 8) | (blk->lba_high_reg << 16);
+    blk->index = index * 512;
     if (blk->drive_head_reg == 0xf0) {
         blk->index += IMGE_SIZE;
     }
@@ -417,30 +434,11 @@ void emulate_disk_portw(struct vcpu *vcpu,
     u8 val1;
     u16 val2;
 
-    //TODO: check io size
-    //if (io.size !=  (1 | 2))
-        //return;
-    
-    if (io.port == 0x1F0) {
-        printf("size=%d\n", io.size);
-        for (int i = 0; i < io.count; i++) {
-            val1 = *(u8*)((u8*)vcpu->kvm_run + io.data_offset);
-            blk->data[blk->index] = val1;
-            vcpu->kvm_run->io.data_offset += io.size;
-            blk->index += 1;
-        }
-
-        if (blk->dev_conotrl_regs == 0) {
-            enq_irr(lapic->irr,32+14);
-            vcpu->kvm_run->request_interrupt_window = 1;
-        }
-
-        return;
-    }
-
     val1 = *(u8*)((u8*)vcpu->kvm_run + io.data_offset);
     
     switch (io.port) {
+    case 0x1F0:
+        emulate_diskw(vcpu, blk, io);
         break;
     case 0x1F2:
         blk->sec_count_reg = val1;
@@ -456,21 +454,18 @@ void emulate_disk_portw(struct vcpu *vcpu,
     case 0x1F6:
         blk->drive_head_reg = val1;
         break;
-    case 0x1F7:
-        if (val1 == 0x20) {
-            emulate_diskr(blk);
-
-            if (blk->dev_conotrl_regs == 0) {
-                enq_irr(lapic->irr,32+14);
-                vcpu->kvm_run->request_interrupt_window = 1;
-            }
-        }
-
-        break;
     case 0x3F6:
         blk->dev_conotrl_regs = val1;
     default:
         break;
+    }
+
+    update_blk_index(blk);
+
+    /* if read or write to data register, inject ide interrupt */
+    if ((io.port == 0x1F0 || io.port == 0x1F7) && blk->dev_conotrl_regs == 0) {
+        enq_irr(lapic->irr,32+14);
+        vcpu->kvm_run->request_interrupt_window = 1;
     }
 }
 
