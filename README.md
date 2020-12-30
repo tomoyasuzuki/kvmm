@@ -13,3 +13,8 @@ The goal of kvmm is to run xv6.
 - [ ] keyboard interrupts
 - [ ] timer
 - [ ] multiproccessor support 
+
+## references
+- [dpw/kvm-hello-world](https://github.com/dpw/kvm-hello-world)
+- [kvmtool/kvmtool](https://github.com/kvmtool/kvmtool)
+- [ykskb/dax86](https://github.com/ykskb/dax86)
