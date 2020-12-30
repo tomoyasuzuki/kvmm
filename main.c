@@ -582,17 +582,6 @@ void emulate_mmio(struct vcpu *vcpu, struct vm *vm,
     }
 }
 
-void debug_sregs(struct vcpu *vcpu) {
-    if (ioctl(vcpu->fd, KVM_GET_SREGS, &(vcpu->sregs)) < 0)
-        error("KVM_GET_SREGS");
-    /* 
-        vcpu->sregs.apic_base is only valid 
-        if in-kernel local APIC is not used
-    */
-    printf("apic base: 0x%llx\n", vcpu->sregs.apic_base);
-    printf("idt base: 0x%llx\n", vcpu->sregs.idt.base);
-}
-
 int main(int argc, char **argv) {
     vm = malloc(sizeof(struct vm));
     vcpu = malloc(sizeof(struct vcpu));
