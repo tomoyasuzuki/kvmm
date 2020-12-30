@@ -9,7 +9,6 @@
 #include <stdint.h>
 #include <linux/kvm.h>
 
-#define CODE_START 0x0
 #define GUEST_PATH "../xv6/xv6.img"
 #define START_ADDRESS 0x7c00
 #define GUEST_MEMORY_SIZE 0x80000000
@@ -21,7 +20,6 @@
 #define LAPIC_BASE 0xfee00000
 #define IOAPIC_BASE 0xfec00000
 #define IOAPIC_REDRTB_BASE (IOAPIC_BASE + 0x10)
-#define MSR_IA32_APICBASE 0x0000001b
 
 typedef uint8_t u8;
 typedef uint8_t u16;
@@ -169,8 +167,8 @@ void init_vcpu(struct vm *vm, struct vcpu *vcpu) {
     }
 
     vcpu->kvm_run = mmap(NULL, mmap_size, 
-                        PROT_READ | PROT_WRITE,
-                        MAP_SHARED, vcpu->fd, 0);
+                         PROT_READ | PROT_WRITE,
+                         MAP_SHARED, vcpu->fd, 0);
 
     if (vcpu->kvm_run == MAP_FAILED) {
         error("kvm_run: failed\n");
@@ -391,7 +389,6 @@ void emulate_disk_portw(struct vcpu *vcpu,
 
     update_blk_index(blk);
 
-    /* if read or write to data register, inject ide interrupt */
     if ((io.port == 0x1F0 || io.port == 0x1F7) && blk->dev_conotrl_regs == 0) {
         enq_irr(lapic->irr,32+14);
         vcpu->kvm_run->request_interrupt_window = 1;
@@ -423,9 +420,6 @@ void emulate_uart_portw(struct vcpu *vcpu, struct io io, struct uart *uart) {
             uart->data_reg = *v;
             vcpu->kvm_run->io.data_offset += io.size;
         }
-        //uart->line_status_reg |= (1<<0);
-        //if (uart->irr_enable_reg) 
-            //enq_irr(lapic->irr, 32+4);
         break;
     case 0x3f9:
         uart->irr_enable_reg = *(u8*)((u8*)vcpu->kvm_run
@@ -445,9 +439,6 @@ void emulate_uart_portr(struct vcpu *vcpu, struct io io, struct uart *uart) {
     case 0x3f8:
         *(unsigned char*)((unsigned char*)vcpu->kvm_run
          + vcpu->kvm_run->io.data_offset) = uart->data_reg; 
-        //uart->line_status_reg &= ~(1<<0);
-        //if (uart->irr_enable_reg == 0xff) 
-            //enq_irr(lapic->irr, 32+4);
         break;
     case 0x3fd:
         *(unsigned char*)((unsigned char*)vcpu->kvm_run
@@ -499,13 +490,9 @@ void emulate_io(struct vcpu *vcpu, struct blk *blk, struct uart *uart) {
 
     switch (io.direction) {
     case KVM_EXIT_IO_OUT:
-        //printf("out: %d\n", io.port);
-        //print_regs(vcpu);
         emulate_io_out(vcpu, blk, io, uart);
         break;
     case KVM_EXIT_IO_IN:
-        //printf("in: %d\n", io.port);
-        //print_regs(vcpu);
         emulate_io_in(vcpu, blk, io, uart);
         break;
     default:
@@ -526,13 +513,6 @@ void emulate_lapicw(struct vcpu *vcpu, struct lapic *lapic) {
     if (vcpu->kvm_run->mmio.is_write)
         lapic->regs[index/4] = data;
 }
-
-/*
-    emulate ioapic access here. 
-
-    1. calculate redirtb offset from phys addr
-    2. check offset is IOREGSEL or IOWIN 
-*/
 
 void emulate_ioapicw(struct vcpu *vcpu, struct ioapic *ioapic) {
     int offset = vcpu->kvm_run->mmio.phys_addr - IOAPIC_BASE;
@@ -615,15 +595,10 @@ int main(int argc, char **argv) {
 
         struct kvm_run *run = vcpu->kvm_run;
 
-        int i = 0;
-
         switch (run->exit_reason) {
         case KVM_EXIT_IO:
             print_regs(vcpu);
             emulate_io(vcpu, blk, uart);
-            // if (i / 1000 == 0)
-            //     enq_irr(lapic->irr, 32+0);
-            i++;
             break;
         case KVM_EXIT_MMIO:
             emulate_mmio(vcpu, vm, lapic, ioapic);
