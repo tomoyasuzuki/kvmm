@@ -109,8 +109,13 @@ struct ioapic {
 };
 
 struct irr_queue {
-    int arr[1000];
+    int buff[1000];
     int last;
+};
+
+struct interrupt_buffer {
+    int head, end, count, max;
+    int *buff;
 };
 
 struct lapic {
@@ -125,14 +130,14 @@ struct vcpu *vcpu;
 struct lapic *lapic;
 
 void enq_irr(struct irr_queue *irr, int value) {
-    irr->arr[irr->last] = value;
+    irr->buff[irr->last] = value;
     irr->last++;
 }
 
 int deq_irr(struct irr_queue *irr) {
-   int out = irr->arr[0];
+   int out = irr->buff[0];
    for (int i = 0; i <= irr->last; i++) {
-       irr->arr[i] = irr->arr[i+1];
+       irr->buff[i] = irr->buff[i+1];
    }
    irr->last--;
 }   
@@ -140,6 +145,48 @@ int deq_irr(struct irr_queue *irr) {
 void error(char *message) {
     perror(message);
     exit(1);
+}
+
+struct interrupt_buffer *init_irr_buff() {
+    struct interrupt_buffer *irr_buff = malloc(sizeof(struct interrupt_buffer));
+    if (irr_buff == NULL) 
+        error("fail to create interrupt buffer\n");
+    irr_buff->head = 0;
+    irr_buff->end = 0;
+    irr_buff->count = 0;
+    irr_buff->max = 1000;
+    irr_buff->buff = malloc(sizeof(4 * 1000));
+    if (irr_buff->buff == NULL) {
+        free(irr_buff);
+        error("irr_buff is NULL");
+        return NULL;
+    }
+
+    return irr_buff;
+}
+
+int is_full(struct interrupt_buffer *buff) {
+    return buff->count == buff->max;
+} 
+
+int is_empty(struct interrupt_buffer *buff) {
+    return buff->count == 0;
+}
+
+void enqueue_irr(struct interrupt_buffer *irr_buff, int value) {
+    if (is_full(irr_buff)) return;
+    irr_buff->buff[irr_buff->end++] = value;
+    irr_buff->count++;
+    if (irr_buff->end == irr_buff->max)
+        irr_buff->end = 0;
+}
+
+void dequeque_irr(struct interrupt_buffer *irr_buff) {
+    if (is_empty(irr_buff)) return;
+    int value = irr_buff->buff[irr_buff->head++];
+    irr_buff->count--;
+    if (irr_buff->head == irr_buff->max)
+        irr_buff->head = 0;
 }
 
 void inject_interrupt(int vcpufd, int irq) {
@@ -282,12 +329,6 @@ void create_blk(struct blk *blk) {
 
         dst += sizef;
     }
-
-    int tmpfd = open("tmp", O_RDWR | O_CREAT);
-    if (tmpfd < 0)
-        error("tmpfd");
-    if (write(tmpfd, (void*)(blk->data+IMGE_SIZE), FS_IMAGE_SIZE) < 0)
-        perror("write");
 }
 
 void init_kvm(struct vm *vm) {
@@ -572,7 +613,7 @@ int main(int argc, char **argv) {
     vm = malloc(sizeof(struct vm));
     vcpu = malloc(sizeof(struct vcpu));
     lapic = malloc(sizeof(struct lapic));
-    lapic->irr = malloc(4 * 4096);
+    lapic->irr = malloc(4096);
 
     kvm_mem *memreg = malloc(sizeof(kvm_mem));
     struct blk *blk = malloc(sizeof(struct blk));
@@ -593,11 +634,6 @@ int main(int argc, char **argv) {
     create_uart(uart);
     create_output_file();
 
-    char *kbd_input;
-
-    pthread_t thread;
-    pthread_create(&thread, NULL, &observe_kbd_input, (void*)kbd_input);
-
     for (;;) {
         if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
             print_regs(vcpu);
@@ -614,12 +650,10 @@ int main(int argc, char **argv) {
         case KVM_EXIT_MMIO:
             emulate_mmio(vcpu, vm, lapic, ioapic);
             break;
-        case KVM_EXIT_EXCEPTION:
-            printf("exception\n");
         case KVM_EXIT_IRQ_WINDOW_OPEN:
-            if (lapic->irr->arr[0] >= 32) {
-                inject_interrupt(vcpu->fd, lapic->irr->arr[0]);
-                printf("inject %d\n", lapic->irr->arr[0]);
+            if (lapic->irr->buff[0] >= 32) {
+                inject_interrupt(vcpu->fd, lapic->irr->buff[0]);
+                printf("inject %d\n", lapic->irr->buff[0]);
                 deq_irr(lapic->irr);
                 vcpu->kvm_run->request_interrupt_window = 0;
             }
