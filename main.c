@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <linux/kvm.h>
+#include <pthread.h>
 
 #define GUEST_PATH "../xv6/xv6.img"
 #define START_ADDRESS 0x7c00
@@ -20,6 +21,7 @@
 #define LAPIC_BASE 0xfee00000
 #define IOAPIC_BASE 0xfec00000
 #define IOAPIC_REDRTB_BASE (IOAPIC_BASE + 0x10)
+#define IRQ_BASE 32
 
 typedef uint8_t u8;
 typedef uint8_t u16;
@@ -39,8 +41,6 @@ struct vcpu {
     struct kvm_sregs sregs;
     struct kvm_regs regs;
 };
-
-struct kvm_lapic;
 
 struct blk {
     u8 *data;
@@ -143,7 +143,7 @@ void error(char *message) {
 }
 
 void inject_interrupt(int vcpufd, int irq) {
-    struct kvm_interrupt *intr = malloc(4096);
+    struct kvm_interrupt *intr = malloc(sizeof(struct kvm_interrupt));
     intr->irq = irq;
     
     
@@ -390,7 +390,7 @@ void emulate_disk_portw(struct vcpu *vcpu,
     update_blk_index(blk);
 
     if ((io.port == 0x1F0 || io.port == 0x1F7) && blk->dev_conotrl_regs == 0) {
-        enq_irr(lapic->irr,32+14);
+        enq_irr(lapic->irr,IRQ_BASE+14);
         vcpu->kvm_run->request_interrupt_window = 1;
     }
 }
@@ -562,6 +562,12 @@ void emulate_mmio(struct vcpu *vcpu, struct vm *vm,
     }
 }
 
+void *observe_kbd_input(void *in) {
+    scanf("%s", (char*)in);
+
+    printf("in=%s", (char*)in);
+}
+
 int main(int argc, char **argv) {
     vm = malloc(sizeof(struct vm));
     vcpu = malloc(sizeof(struct vcpu));
@@ -587,6 +593,11 @@ int main(int argc, char **argv) {
     create_uart(uart);
     create_output_file();
 
+    char *kbd_input;
+
+    pthread_t thread;
+    pthread_create(&thread, NULL, &observe_kbd_input, (void*)kbd_input);
+
     for (;;) {
         if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
             print_regs(vcpu);
@@ -597,7 +608,7 @@ int main(int argc, char **argv) {
 
         switch (run->exit_reason) {
         case KVM_EXIT_IO:
-            print_regs(vcpu);
+            //print_regs(vcpu);
             emulate_io(vcpu, blk, uart);
             break;
         case KVM_EXIT_MMIO:
