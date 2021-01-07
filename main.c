@@ -14,6 +14,10 @@
 #include "vcpu.h"
 #include "blk.h"
 #include "io.h"
+#include "lapic.h"
+#include "ioapic.h"
+#include "mmio.h"
+#include "uart.h"
 
 #define GUEST_PATH "../xv6/xv6.img"
 #define START_ADDRESS 0x7c00
@@ -23,10 +27,10 @@
 #define GUEST_BINARY_SIZE (4096 * 128)
 // #define IMGE_SIZE 5120000
 #define FS_IMAGE_SIZE (500 * 1024)
-#define LAPIC_BASE 0xfee00000
-#define IOAPIC_BASE 0xfec00000
-#define IOAPIC_REDRTB_BASE (IOAPIC_BASE + 0x10)
-#define IRQ_BASE 32
+// #define LAPIC_BASE 0xfee00000
+// #define IOAPIC_BASE 0xfec00000
+// #define IOAPIC_REDRTB_BASE (IOAPIC_BASE + 0x10)
+// #define IRQ_BASE 32
 
 typedef struct kvm_userspace_memory_region kvm_mem;
 
@@ -64,55 +68,50 @@ struct vm {
 //     __u64 data_offset; 
 // };
 
-struct mmio {
-    __u64 phys_addr;
-	__u8  data[8];
-	__u32 len;
-	__u8  is_write;
-};
+// struct mmio {
+//     __u64 phys_addr;
+// 	__u8  data[8];
+// 	__u32 len;
+// 	__u8  is_write;
+// };
 
-struct uart {
-    u8 data_reg;
-    u8 irr_enable_reg;
-    u8 irr_id_reg;
-    u8 line_control_reg;
-    u8 modem_control_reg;
-    u8 line_status_reg;
-    u8 modem_status_reg;
-    u8 scratch_reg;
-};
+// struct uart {
+//     u8 data_reg;
+//     u8 irr_enable_reg;
+//     u8 irr_id_reg;
+//     u8 line_control_reg;
+//     u8 modem_control_reg;
+//     u8 line_status_reg;
+//     u8 modem_status_reg;
+//     u8 scratch_reg;
+// };
 
-union redirtb_entry {
-    struct {
-        u64 vec : 8;
-        u64 deliverly_mode : 3;
-        u64 dest_mode : 1;
-        u64 deliverly_status : 1;
-        u64 pin_polarity : 1;
-        u64 remote_irr : 1;
-        u64 trigger_mode : 1;
-        u64 mask : 1;
-        u64 : 39;
-        u64 destination : 8;
-    } fields;
-    struct {
-        u32 lower;
-        u32 upper;
-    } regs;
-};
+// union redirtb_entry {
+//     struct {
+//         u64 vec : 8;
+//         u64 deliverly_mode : 3;
+//         u64 dest_mode : 1;
+//         u64 deliverly_status : 1;
+//         u64 pin_polarity : 1;
+//         u64 remote_irr : 1;
+//         u64 trigger_mode : 1;
+//         u64 mask : 1;
+//         u64 : 39;
+//         u64 destination : 8;
+//     } fields;
+//     struct {
+//         u32 lower;
+//         u32 upper;
+//     } regs;
+// };
 
-struct ioapic {
-    u32 ioregsel;
-    u32 iowin;
-    u32 id;
-    u32 vec;
-    union redirtb_entry redirtb[24];
-};
-
-struct interrupt_buffer {
-    int head, end, count, max;
-    int *buff;
-};
+// struct ioapic {
+//     u32 ioregsel;
+//     u32 iowin;
+//     u32 id;
+//     u32 vec;
+//     union redirtb_entry redirtb[24];
+// };
 
 int outfd = 0;
 
@@ -145,57 +144,6 @@ int irr_count = 0;
 //     perror(message);
 //     exit(1);
 // }
-
-struct interrupt_buffer *init_irr_buff() {
-    struct interrupt_buffer *irr_buff = malloc(sizeof(struct interrupt_buffer));
-    if (irr_buff == NULL) 
-        error("fail to create interrupt buffer\n");
-    irr_buff->head = 0;
-    irr_buff->end = 0;
-    irr_buff->count = 0;
-    irr_buff->max = 1000;
-    irr_buff->buff = malloc(sizeof(4 * 1000));
-    if (irr_buff->buff == NULL) {
-        free(irr_buff);
-        error("irr_buff is NULL");
-        return NULL;
-    }
-
-    return irr_buff;
-}
-
-int is_full(struct interrupt_buffer *buff) {
-    return buff->count == buff->max;
-} 
-
-int is_empty(struct interrupt_buffer *buff) {
-    return buff->count == 0;
-}
-
-void enqueue_irr(struct interrupt_buffer *irr_buff, int value) {
-    if (is_full(irr_buff)) return;
-    irr_buff->buff[irr_buff->end++] = value;
-    irr_buff->count++;
-    if (irr_buff->end == irr_buff->max)
-        irr_buff->end = 0;
-}
-
-void dequeque_irr(struct interrupt_buffer *irr_buff) {
-    if (is_empty(irr_buff)) return;
-    int value = irr_buff->buff[irr_buff->head++];
-    irr_buff->count--;
-    if (irr_buff->head == irr_buff->max)
-        irr_buff->head = 0;
-}
-
-void inject_interrupt(int vcpufd, int irq) {
-    struct kvm_interrupt *intr = malloc(sizeof(struct kvm_interrupt));
-    intr->irq = irq;
-    
-    
-    if (ioctl(vcpufd, KVM_INTERRUPT, intr) < 0)
-        perror("KVM_INTERRUPT");
-}
 
 void init_vcpu(struct vm *vm, struct vcpu *vcpu) {
     int mmap_size;
@@ -443,44 +391,44 @@ void create_output_file() {
 
 int write_f = 0;
 
-void emulate_uart_portw(struct vcpu *vcpu, struct io io, struct uart *uart) {
-    switch (io.port) {
-    case 0x3f8:
-        for (int i = 0; i < io.count; i++) {
-            char *v = (char*)((unsigned char*)vcpu->kvm_run + io.data_offset);
-            printf("%c", *v);
-            write(outfd, v, 1);
-            uart->data_reg = *v;
-            vcpu->kvm_run->io.data_offset += io.size;
-        }
-        break;
-    case 0x3f9:
-        uart->irr_enable_reg = *(u8*)((u8*)vcpu->kvm_run
-         + vcpu->kvm_run->io.data_offset);
-    case 0x3fd:
-        uart->line_status_reg = *(u8*)((u8*)vcpu->kvm_run
-         + vcpu->kvm_run->io.data_offset);
-        break;
-    default:
-        break;
-    }
-}
+// void emulate_uart_portw(struct vcpu *vcpu, struct io io, struct uart *uart) {
+//     switch (io.port) {
+//     case 0x3f8:
+//         for (int i = 0; i < io.count; i++) {
+//             char *v = (char*)((unsigned char*)vcpu->kvm_run + io.data_offset);
+//             printf("%c", *v);
+//             write(outfd, v, 1);
+//             uart->data_reg = *v;
+//             vcpu->kvm_run->io.data_offset += io.size;
+//         }
+//         break;
+//     case 0x3f9:
+//         uart->irr_enable_reg = *(u8*)((u8*)vcpu->kvm_run
+//          + vcpu->kvm_run->io.data_offset);
+//     case 0x3fd:
+//         uart->line_status_reg = *(u8*)((u8*)vcpu->kvm_run
+//          + vcpu->kvm_run->io.data_offset);
+//         break;
+//     default:
+//         break;
+//     }
+// }
 
-void emulate_uart_portr(struct vcpu *vcpu, struct io io, struct uart *uart) {
-    switch (io.port)
-    {
-    case 0x3f8:
-        *(unsigned char*)((unsigned char*)vcpu->kvm_run
-         + vcpu->kvm_run->io.data_offset) = uart->data_reg; 
-        break;
-    case 0x3fd:
-        *(unsigned char*)((unsigned char*)vcpu->kvm_run
-         + vcpu->kvm_run->io.data_offset) = uart->line_status_reg; 
-        break;
-    default:
-        break;
-    }
-}
+// void emulate_uart_portr(struct vcpu *vcpu, struct io io, struct uart *uart) {
+//     switch (io.port)
+//     {
+//     case 0x3f8:
+//         *(unsigned char*)((unsigned char*)vcpu->kvm_run
+//          + vcpu->kvm_run->io.data_offset) = uart->data_reg; 
+//         break;
+//     case 0x3fd:
+//         *(unsigned char*)((unsigned char*)vcpu->kvm_run
+//          + vcpu->kvm_run->io.data_offset) = uart->line_status_reg; 
+//         break;
+//     default:
+//         break;
+//     }
+// }
 
 int ck = -1;
 char vk = 0;
@@ -558,48 +506,17 @@ void emulate_io(struct vcpu *vcpu, struct blk *blk, struct uart *uart) {
     }
 }
 
-void emulate_lapicw(struct vcpu *vcpu, struct lapic *lapic) {
-    int index = vcpu->kvm_run->mmio.phys_addr - LAPIC_BASE;
-    u32 data = 0;
+// void emulate_lapicw(struct vcpu *vcpu, struct lapic *lapic) {
+//     int index = vcpu->kvm_run->mmio.phys_addr - LAPIC_BASE;
+//     u32 data = 0;
 
-    for (int i = 0; i < 4; i++) {
-        data |= vcpu->kvm_run->mmio.data[i] << i*8;
-    }
+//     for (int i = 0; i < 4; i++) {
+//         data |= vcpu->kvm_run->mmio.data[i] << i*8;
+//     }
 
-    if (vcpu->kvm_run->mmio.is_write)
-        lapic->regs[index/4] = data;
-}
-
-void emulate_ioapicw(struct vcpu *vcpu, struct ioapic *ioapic) {
-    int offset = vcpu->kvm_run->mmio.phys_addr - IOAPIC_BASE;
-    int i;
-
-    switch (offset) {
-    case 0:
-        for (i = 0; i < 4; i++)
-            ioapic->ioregsel |= (u32)vcpu->kvm_run->mmio.data[i] << i*8;
-        break;
-    case 4:
-        for (i = 0; i < 4; i++) 
-            ioapic->iowin |= (u32)vcpu->kvm_run->mmio.data[i] << i*8;
-        /* write redirtb */
-        int offset = ioapic->ioregsel - 10;
-        if ((offset / 2) == 0)  {
-            for (i = 0; i < 4; i++) {
-                ioapic->redirtb[offset / 2].regs.lower 
-                    |= (u32)vcpu->kvm_run->mmio.data[i] << i*8;
-            }
-        } else {
-            for (i = 0; i < 4; i++) {
-                ioapic->redirtb[(offset - 1) / 2].regs.upper 
-                    |= (u32)vcpu->kvm_run->mmio.data[i] << i*8;
-            }
-        }
-        break;
-    default:
-        break;
-    }
-}
+//     if (vcpu->kvm_run->mmio.is_write)
+//         lapic->regs[index/4] = data;
+// }
 
 void emulate_mmio(struct vcpu *vcpu, struct vm *vm,
                   struct lapic *lapic,
