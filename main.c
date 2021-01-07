@@ -18,15 +18,16 @@
 #include "ioapic.h"
 #include "mmio.h"
 #include "uart.h"
+#include "vm.h"
 
-#define GUEST_PATH "../xv6/xv6.img"
-#define START_ADDRESS 0x7c00
-#define GUEST_MEMORY_SIZE 0x80000000
-#define ALIGNMENT_SIZE 0x1000
-#define DEFAULT_FLAGS 0x0000000000000002ULL
-#define GUEST_BINARY_SIZE (4096 * 128)
+// #define GUEST_PATH "../xv6/xv6.img"
+// #define START_ADDRESS 0x7c00
+// #define GUEST_MEMORY_SIZE 0x80000000
+// #define ALIGNMENT_SIZE 0x1000
+// #define DEFAULT_FLAGS 0x0000000000000002ULL
+// #define GUEST_BINARY_SIZE (4096 * 128)
 // #define IMGE_SIZE 5120000
-#define FS_IMAGE_SIZE (500 * 1024)
+//#define FS_IMAGE_SIZE (500 * 1024)
 // #define LAPIC_BASE 0xfee00000
 // #define IOAPIC_BASE 0xfec00000
 // #define IOAPIC_REDRTB_BASE (IOAPIC_BASE + 0x10)
@@ -34,11 +35,11 @@
 
 typedef struct kvm_userspace_memory_region kvm_mem;
 
-struct vm {
-    int vm_fd;
-    int fd;
-    void *mem;
-};
+// struct vm {
+//     int vm_fd;
+//     int fd;
+//     void *mem;
+// };
 
 // struct vcpu {
 //     int fd;
@@ -145,68 +146,68 @@ int irr_count = 0;
 //     exit(1);
 // }
 
-void init_vcpu(struct vm *vm, struct vcpu *vcpu) {
-    int mmap_size;
+// void init_vcpu(struct vm *vm, struct vcpu *vcpu) {
+//     int mmap_size;
 
-    vcpu->fd = ioctl(vm->fd, KVM_CREATE_VCPU, 0);
+//     vcpu->fd = ioctl(vm->fd, KVM_CREATE_VCPU, 0);
     
-    if (vcpu->fd < 0) {
-        error("KVM_CREATE_VCPU");
-    }
+//     if (vcpu->fd < 0) {
+//         error("KVM_CREATE_VCPU");
+//     }
 
-    mmap_size = ioctl(vm->vm_fd, KVM_GET_VCPU_MMAP_SIZE, 0);
+//     mmap_size = ioctl(vm->vm_fd, KVM_GET_VCPU_MMAP_SIZE, 0);
 
-    if (mmap_size <= 0) {
-        error("KVM_GET_VCPU_MMAP_SIZE");
-    }
+//     if (mmap_size <= 0) {
+//         error("KVM_GET_VCPU_MMAP_SIZE");
+//     }
 
-    vcpu->kvm_run = mmap(NULL, mmap_size, 
-                         PROT_READ | PROT_WRITE,
-                         MAP_SHARED, vcpu->fd, 0);
+//     vcpu->kvm_run = mmap(NULL, mmap_size, 
+//                          PROT_READ | PROT_WRITE,
+//                          MAP_SHARED, vcpu->fd, 0);
 
-    if (vcpu->kvm_run == MAP_FAILED) {
-        error("kvm_run: failed\n");
-    }
-}
+//     if (vcpu->kvm_run == MAP_FAILED) {
+//         error("kvm_run: failed\n");
+//     }
+// }
 
-void set_sregs(struct kvm_sregs *sregs) {
-    sregs->cs.selector = 0;
-	sregs->cs.base = 0;
-}
+// void set_sregs(struct kvm_sregs *sregs) {
+//     sregs->cs.selector = 0;
+// 	sregs->cs.base = 0;
+// }
 
-void set_regs(struct vcpu *vcpu) {
-    if (ioctl(vcpu->fd, KVM_GET_SREGS, &(vcpu->sregs)) < 0) {
-        error("KVM_GET_SREGS");
-    }
+// void set_regs(struct vcpu *vcpu) {
+//     if (ioctl(vcpu->fd, KVM_GET_SREGS, &(vcpu->sregs)) < 0) {
+//         error("KVM_GET_SREGS");
+//     }
 
-    set_sregs(&vcpu->sregs);
+//     set_sregs(&vcpu->sregs);
 
-    if (ioctl(vcpu->fd, KVM_SET_SREGS, &(vcpu->sregs)) < 0) {
-        error("KVM_SET_SREGS");
-    }
+//     if (ioctl(vcpu->fd, KVM_SET_SREGS, &(vcpu->sregs)) < 0) {
+//         error("KVM_SET_SREGS");
+//     }
 
-    vcpu->regs.rflags = DEFAULT_FLAGS;
-    vcpu->regs.rip = START_ADDRESS;
+//     vcpu->regs.rflags = DEFAULT_FLAGS;
+//     vcpu->regs.rip = START_ADDRESS;
 
-    if (ioctl(vcpu->fd, KVM_SET_REGS, &(vcpu->regs)) < 0) {
-        error("KVM_SET_REGS");
-    }
-}
+//     if (ioctl(vcpu->fd, KVM_SET_REGS, &(vcpu->regs)) < 0) {
+//         error("KVM_SET_REGS");
+//     }
+// }
 
-void load_guest_binary(void *dst) {
-    int fd = open("../xv6/bootblock", O_RDONLY);
-    if (fd < 0) 
-        error("open fail");
+// void load_guest_binary(void *dst) {
+//     int fd = open("../xv6/bootblock", O_RDONLY);
+//     if (fd < 0) 
+//         error("open fail");
     
-    void *tmp = dst;
-    for(;;) {
-        int size = read(fd, tmp + START_ADDRESS, 
-                        GUEST_BINARY_SIZE);
-        if (size <= 0) 
-            break;
-        tmp += size;
-    }
-}
+//     void *tmp = dst;
+//     for(;;) {
+//         int size = read(fd, tmp + START_ADDRESS, 
+//                         GUEST_BINARY_SIZE);
+//         if (size <= 0) 
+//             break;
+//         tmp += size;
+//     }
+// }
 
 void memalign(void **dst, size_t size, size_t align) {
     if (posix_memalign(dst, size, align) < 0) {
@@ -285,13 +286,6 @@ void init_kvm(struct vm *vm) {
     }
 }
 
-void create_vm(struct vm *vm) {
-    vm->fd = ioctl(vm->vm_fd, KVM_CREATE_VM, 0);
-    if (vm->fd < 0) {
-        error("KVM_CREATE_VM");
-    }
-}
-
 void create_uart(struct uart *uart) {
     uart->data_reg = 0;
     uart->irr_enable_reg = 0;
@@ -303,11 +297,11 @@ void create_uart(struct uart *uart) {
     uart->scratch_reg = 0;
 }
 
-void set_tss(int fd) {
-    if (ioctl(fd, KVM_SET_TSS_ADDR, 0xfffbd000) < 0) {
-        error("KVM_SET_TSS_ADDR");
-    }
-}
+// void set_tss(int fd) {
+//     if (ioctl(fd, KVM_SET_TSS_ADDR, 0xfffbd000) < 0) {
+//         error("KVM_SET_TSS_ADDR");
+//     }
+// }
 
 void create_output_file() {
     outfd = open("out.txt", O_RDWR | O_CREAT);
