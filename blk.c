@@ -2,6 +2,46 @@
 
 extern struct lapic *lapic;
 
+void create_blk(struct blk *blk) {
+    blk->data = malloc(IMGE_SIZE * 100);
+    blk->data_reg = 0;
+    blk->drive_head_reg = 0;
+    blk->lba_high_reg = 0;
+    blk->lba_middle_reg = 0;
+    blk->lba_low_reg = 0;
+    blk->sec_count_reg = 0;
+    blk->status_command_reg = 0x40;
+    blk->dev_conotrl_regs = 0;
+
+    int img_fd = open("../xv6/xv6.img", O_RDONLY);
+    if (img_fd < 0)
+        error("faile open xv6.img");
+
+    void *dst = (void*)blk->data;
+    for(;;) {
+        int size = read(img_fd, dst, IMGE_SIZE);
+        if (size <= 0) 
+            break;
+
+        dst += size;
+    }
+
+    dst = (void*)blk->data+IMGE_SIZE;
+
+    int fs_fd = open("../xv6/fs.img", O_RDONLY);
+    if (fs_fd < 0)
+        error("faile oepn fs.img\n");
+    
+    for(;;) {
+        int sizef = read(fs_fd, dst, FS_IMAGE_SIZE);
+        if (sizef <= 0) {
+            break;
+        }
+
+        dst += sizef;
+    }
+}
+
 void emulate_diskr(struct vcpu *vcpu, struct blk *blk) {
     u32 data = 0;
     for (int i = 0; i < vcpu->kvm_run->io.count; ++i) {
