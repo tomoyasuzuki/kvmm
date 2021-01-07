@@ -128,10 +128,14 @@ int outfd = 0;
 struct vm *vm;
 struct vcpu *vcpu;
 struct lapic *lapic;
+struct blk *blk;
+struct uart *uart;
+int irr_count = 0;
 
 void enq_irr(struct irr_queue *irr, int value) {
     irr->buff[irr->last] = value;
     irr->last++;
+    irr_count++;
 }
 
 int deq_irr(struct irr_queue *irr) {
@@ -140,6 +144,10 @@ int deq_irr(struct irr_queue *irr) {
        irr->buff[i] = irr->buff[i+1];
    }
    irr->last--;
+
+    if (irr_count > 0) {
+        irr_count--;
+    }
 }   
 
 void error(char *message) {
@@ -452,11 +460,14 @@ void emulate_disk_portr(struct vcpu *vcpu,
     }
 }
 
+int write_f = 0;
+
 void emulate_uart_portw(struct vcpu *vcpu, struct io io, struct uart *uart) {
     switch (io.port) {
     case 0x3f8:
         for (int i = 0; i < io.count; i++) {
             char *v = (char*)((unsigned char*)vcpu->kvm_run + io.data_offset);
+            printf("%c", *v);
             write(outfd, v, 1);
             uart->data_reg = *v;
             vcpu->kvm_run->io.data_offset += io.size;
@@ -490,6 +501,25 @@ void emulate_uart_portr(struct vcpu *vcpu, struct io io, struct uart *uart) {
     }
 }
 
+int ck = -1;
+char vk = 0;
+
+void emulate_kbd_portr(struct io io) {
+    switch (io.port)
+    {
+    case 0x64:
+        *(unsigned char*)((unsigned char*)vcpu->kvm_run
+         + vcpu->kvm_run->io.data_offset) = 1;
+        break;
+    case 0x60:
+        *(unsigned char*)((unsigned char*)vcpu->kvm_run
+         + vcpu->kvm_run->io.data_offset) = vk;
+        break;
+    default:
+        break;
+    }
+}
+
 void emulate_io_out(struct vcpu *vcpu, struct blk *blk, 
                     struct io io, struct uart *uart) {
     switch (io.port) {
@@ -515,6 +545,10 @@ void emulate_io_in(struct vcpu *vcpu, struct blk *blk,
         break;
     case 0x3f8 ... 0x3fd:
         emulate_uart_portr(vcpu, io, uart);
+        break;
+    case 0x60 ... 0x64:
+        emulate_kbd_portr(io);
+        break;
     default:
         break;
     }
@@ -603,10 +637,16 @@ void emulate_mmio(struct vcpu *vcpu, struct vm *vm,
     }
 }
 
-void *observe_kbd_input(void *in) {
-    scanf("%s", (char*)in);
+int flag = 0;
 
-    printf("in=%s", (char*)in);
+void *observe_input(void *in) {
+    for (;;) {
+        int size = read(STDIN_FILENO, in, 1);
+        uart->data_reg = *(char*)in;
+        enq_irr(lapic->irr, IRQ_BASE+4);
+        vcpu->kvm_run->request_interrupt_window = 1;
+        flag = 1;
+    }
 }
 
 int main(int argc, char **argv) {
@@ -614,14 +654,15 @@ int main(int argc, char **argv) {
     vcpu = malloc(sizeof(struct vcpu));
     lapic = malloc(sizeof(struct lapic));
     lapic->irr = malloc(4096);
+    blk = malloc(sizeof(struct blk));
+    uart = malloc(sizeof(struct uart));
 
     kvm_mem *memreg = malloc(sizeof(kvm_mem));
-    struct blk *blk = malloc(sizeof(struct blk));
     struct kvm_vcpu_events *events = malloc(sizeof(struct kvm_vcpu_events));
     struct kvm_pit_state2 *pit = malloc(sizeof(struct kvm_pit_state2));
     struct kvm_msrs *msrs = malloc(sizeof(struct kvm_msrs));
     struct ioapic *ioapic = malloc(sizeof(struct ioapic));
-    struct uart *uart = malloc(sizeof(struct uart));
+    
 
     init_kvm(vm);
     create_vm(vm);
@@ -634,6 +675,13 @@ int main(int argc, char **argv) {
     create_uart(uart);
     create_output_file();
 
+    pthread_t thread;
+    char input[100];
+
+    if (pthread_create(&thread, NULL, observe_input, input) != 0) {
+        error("pthread_create");
+    }
+
     for (;;) {
         if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
             print_regs(vcpu);
@@ -641,6 +689,13 @@ int main(int argc, char **argv) {
         }
 
         struct kvm_run *run = vcpu->kvm_run;
+
+        // if (input != NULL) {
+        //     write(outfd, input, 1);
+        //     uart->data_reg = *input;
+        //     enq_irr(lapic->irr, IRQ_BASE+4);
+        //     run->request_interrupt_window = 1;
+        // }
 
         switch (run->exit_reason) {
         case KVM_EXIT_IO:
@@ -652,8 +707,13 @@ int main(int argc, char **argv) {
             break;
         case KVM_EXIT_IRQ_WINDOW_OPEN:
             if (lapic->irr->buff[0] >= 32) {
-                inject_interrupt(vcpu->fd, lapic->irr->buff[0]);
+                if (flag == 1) {
+                    inject_interrupt(vcpu->fd, IRQ_BASE+4);
+                } else {
+                    inject_interrupt(vcpu->fd, lapic->irr->buff[0]);
+                }
                 printf("inject %d\n", lapic->irr->buff[0]);
+                printf("irrcount: %d\n", irr_count);
                 deq_irr(lapic->irr);
                 vcpu->kvm_run->request_interrupt_window = 0;
             }
