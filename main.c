@@ -39,13 +39,6 @@
 //     void *mem;
 // };
 
-// struct vcpu {
-//     int fd;
-//     struct kvm_run *kvm_run;
-//     struct kvm_sregs sregs;
-//     struct kvm_regs regs;
-// };
-
 // struct blk {
 //     u8 *data;
 //     u16 data_reg;
@@ -207,12 +200,6 @@ int irr_count = 0;
 //     }
 // }
 
-
-void print_regs(struct vcpu *vcpu) {
-    ioctl(vcpu->fd, KVM_GET_REGS, &(vcpu->regs));
-    printf("rip: 0x%llx\n", vcpu->regs.rip);
-}
-
 void init_kvm(struct vm *vm) {
     vm->vm_fd = open("/dev/kvm", O_RDWR);
     if (vm->vm_fd < 0) { 
@@ -220,16 +207,16 @@ void init_kvm(struct vm *vm) {
     }
 }
 
-void create_uart(struct uart *uart) {
-    uart->data_reg = 0;
-    uart->irr_enable_reg = 0;
-    uart->irr_id_reg = 0;
-    uart->line_control_reg = 0;
-    uart->modem_control_reg = 0;
-    uart->line_status_reg = 0;
-    uart->modem_status_reg = 0;
-    uart->scratch_reg = 0;
-}
+// void create_uart(struct uart *uart) {
+//     uart->data_reg = 0;
+//     uart->irr_enable_reg = 0;
+//     uart->irr_id_reg = 0;
+//     uart->line_control_reg = 0;
+//     uart->modem_control_reg = 0;
+//     uart->line_status_reg = 0;
+//     uart->modem_status_reg = 0;
+//     uart->scratch_reg = 0;
+// }
 
 // void set_tss(int fd) {
 //     if (ioctl(fd, KVM_SET_TSS_ADDR, 0xfffbd000) < 0) {
@@ -361,78 +348,80 @@ int write_f = 0;
 int ck = -1;
 char vk = 0;
 
-void emulate_kbd_portr(struct io io) {
-    switch (io.port)
-    {
-    case 0x64:
-        *(unsigned char*)((unsigned char*)vcpu->kvm_run
-         + vcpu->kvm_run->io.data_offset) = 1;
-        break;
-    case 0x60:
-        *(unsigned char*)((unsigned char*)vcpu->kvm_run
-         + vcpu->kvm_run->io.data_offset) = vk;
-        break;
-    default:
-        break;
-    }
-}
+// void emulate_kbd_portr(struct io io) {
+//     switch (io.port)
+//     {
+//     case 0x64:
+//         *(unsigned char*)((unsigned char*)vcpu->kvm_run
+//          + vcpu->kvm_run->io.data_offset) = 1;
+//         break;
+//     case 0x60:
+//         *(unsigned char*)((unsigned char*)vcpu->kvm_run
+//          + vcpu->kvm_run->io.data_offset) = vk;
+//         break;
+//     default:
+//         break;
+//     }
+// }
 
-void emulate_io_out(struct vcpu *vcpu, struct blk *blk, 
-                    struct io io, struct uart *uart) {
-    switch (io.port) {
-    case 0x1F0 ... 0x1F7:
-        emulate_disk_portw(vcpu, blk, io);
-        break;
-    case 0x3F6:
-        emulate_disk_portw(vcpu, blk, io);
-        break;
-    case 0x3F8 ... 0x3FD:
-        emulate_uart_portw(vcpu, io, uart);
-        break;
-    default:
-        break;
-    }
-}
+// void emulate_io_out(struct vcpu *vcpu, struct blk *blk, 
+//                     struct io io, struct uart *uart) {
+//     switch (io.port) {
+//     case 0x1F0 ... 0x1F7:
+//         emulate_disk_portw(vcpu, blk, io);
+//         break;
+//     case 0x3F6:
+//         emulate_disk_portw(vcpu, blk, io);
+//         break;
+//     case 0x3F8 ... 0x3FD:
+//         emulate_uart_portw(vcpu, io, uart);
+//         break;
+//     default:
+//         break;
+//     }
+// }
 
-void emulate_io_in(struct vcpu *vcpu, struct blk *blk, 
-                   struct io io, struct uart *uart) {
-    switch (io.port) {
-    case 0x1F0 ... 0x1F7:
-        emulate_disk_portr(vcpu, blk);
-        break;
-    case 0x3f8 ... 0x3fd:
-        emulate_uart_portr(vcpu, io, uart);
-        break;
-    case 0x60 ... 0x64:
-        emulate_kbd_portr(io);
-        break;
-    default:
-        break;
-    }
-}
+// void emulate_io_in(struct vcpu *vcpu, struct blk *blk, 
+//                    struct io io, struct uart *uart) {
+//     switch (io.port) {
+//     case 0x1F0 ... 0x1F7:
+//         emulate_disk_portr(vcpu, blk);
+//         break;
+//     case 0x3f8 ... 0x3fd:
+//         emulate_uart_portr(vcpu, io, uart);
+//         break;
+//     case 0x60 ... 0x64:
+//         emulate_kbd_portr(io);
+//         break;
+//     default:
+//         break;
+//     }
+// }
 
-void emulate_io(struct vcpu *vcpu, struct blk *blk, struct uart *uart) {
-    struct io io = {
-        .direction = vcpu->kvm_run->io.direction,
-        .size = vcpu->kvm_run->io.size,
-        .port = vcpu->kvm_run->io.port,
-        .count = vcpu->kvm_run->io.count,
-        .data_offset = vcpu->kvm_run->io.data_offset
-    };
+// void emulate_io(struct vcpu *vcpu, struct blk *blk, struct uart *uart) {
+//     struct io io = {
+//         .direction = vcpu->kvm_run->io.direction,
+//         .size = vcpu->kvm_run->io.size,
+//         .port = vcpu->kvm_run->io.port,
+//         .count = vcpu->kvm_run->io.count,
+//         .data_offset = vcpu->kvm_run->io.data_offset
+//     };
 
-    switch (io.direction) {
-    case KVM_EXIT_IO_OUT:
-        emulate_io_out(vcpu, blk, io, uart);
-        break;
-    case KVM_EXIT_IO_IN:
-        emulate_io_in(vcpu, blk, io, uart);
-        break;
-    default:
-        printf("exit reason: %d\n", vcpu->kvm_run->exit_reason);
-        print_regs(vcpu);
-        break;
-    }
-}
+ 
+// ￼
+// ￼   switch (io.direction) {
+//     case KVM_EXIT_IO_OUT:
+//         emulate_io_out(vcpu, blk, io, uart);
+//         break;
+//     case KVM_EXIT_IO_IN:
+//         emulate_io_in(vcpu, blk, io, uart);
+//         break;
+//     default:
+//         printf("exit reason: %d\n", vcpu->kvm_run->exit_reason);
+//         print_regs(vcpu);
+//         break;
+//     }
+// }
 
 // void emulate_lapicw(struct vcpu *vcpu, struct lapic *lapic) {
 //     int index = vcpu->kvm_run->mmio.phys_addr - LAPIC_BASE;
@@ -496,7 +485,7 @@ int main(int argc, char **argv) {
     set_tss(vm->fd);
     set_vm_mem(vm, memreg, 0, GUEST_MEMORY_SIZE);    
     load_guest_binary(vm->mem);
-    init_vcpu(vm, vcpu);
+    init_vcpu(vm);
     set_regs(vcpu);
     create_uart(uart);
     create_output_file();
@@ -518,7 +507,7 @@ int main(int argc, char **argv) {
 
         switch (run->exit_reason) {
         case KVM_EXIT_IO:
-            emulate_io(vcpu, blk, uart);
+            emulate_io(vcpu);
             break;
         case KVM_EXIT_MMIO:
             emulate_mmio(vcpu, vm, lapic, ioapic);

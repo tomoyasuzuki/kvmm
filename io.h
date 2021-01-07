@@ -1,10 +1,9 @@
 #pragma once
-#include <linux/kvm.h>
 
-struct io {
-    __u8 direction;
-    __u8 size;
-    __u16 port;
-    __u32 count;
-    __u64 data_offset; 
-};
+#include <linux/kvm.h>
+#include "type.h"
+#include "vcpu.h"
+#include "uart.h"
+#include "blk.h"
+
+void emulate_io(struct vcpu *vcpu);

@@ -2,7 +2,6 @@
 
 #include "type.h"
 #include "vcpu.h"
-#include "io.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -19,5 +18,6 @@ struct uart {
     u8 scratch_reg;
 };
 
-void emulate_uart_portw(struct vcpu *vcpu, struct io io, struct uart *uart);
-void emulate_uart_portr(struct vcpu *vcpu, struct io io, struct uart *uart);
+void create_uart();
+void emulate_uart_portw(struct vcpu *vcpu, int port, int count, int size);
+void emulate_uart_portr(struct vcpu *vcpu, int port);

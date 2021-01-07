@@ -2,15 +2,29 @@
 
 extern int outfd;
 
-void emulate_uart_portw(struct vcpu *vcpu, struct io io, struct uart *uart) {
-    switch (io.port) {
+struct uart *uart;
+
+void create_uart() {
+    uart = malloc(sizeof(struct uart));
+    uart->data_reg = 0;
+    uart->irr_enable_reg = 0;
+    uart->irr_id_reg = 0;
+    uart->line_control_reg = 0;
+    uart->modem_control_reg = 0;
+    uart->line_status_reg = 0;
+    uart->modem_status_reg = 0;
+    uart->scratch_reg = 0;
+}
+
+void emulate_uart_portw(struct vcpu *vcpu, int port, int count, int size) {
+    switch (port) {
     case 0x3f8:
-        for (int i = 0; i < io.count; i++) {
-            char *v = (char*)((unsigned char*)vcpu->kvm_run + io.data_offset);
+        for (int i = 0; i < count; i++) {
+            char *v = (char*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
             printf("%c", *v);
             write(outfd, v, 1);
             uart->data_reg = *v;
-            vcpu->kvm_run->io.data_offset += io.size;
+            vcpu->kvm_run->io.data_offset += size;
         }
         break;
     case 0x3f9:
@@ -25,8 +39,8 @@ void emulate_uart_portw(struct vcpu *vcpu, struct io io, struct uart *uart) {
     }
 }
 
-void emulate_uart_portr(struct vcpu *vcpu, struct io io, struct uart *uart) {
-    switch (io.port)
+void emulate_uart_portr(struct vcpu *vcpu, int port) {
+    switch (port)
     {
     case 0x3f8:
         *(unsigned char*)((unsigned char*)vcpu->kvm_run

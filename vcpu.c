@@ -1,7 +1,11 @@
 #include "vcpu.h"
 
-void init_vcpu(struct vm *vm, struct vcpu *vcpu) {
+struct vcpu *vcpu;
+
+void init_vcpu(struct vm *vm) {
     int mmap_size;
+
+    vcpu = malloc(sizeof(struct vcpu));
 
     vcpu->fd = ioctl(vm->fd, KVM_CREATE_VCPU, 0);
     
@@ -24,12 +28,17 @@ void init_vcpu(struct vm *vm, struct vcpu *vcpu) {
     }
 }
 
+void print_regs() {
+    ioctl(vcpu->fd, KVM_GET_REGS, &(vcpu->regs));
+    printf("rip: 0x%llx\n", vcpu->regs.rip);
+}
+
 void set_sregs(struct kvm_sregs *sregs) {
     sregs->cs.selector = 0;
 	sregs->cs.base = 0;
 }
 
-void set_regs(struct vcpu *vcpu) {
+void set_regs() {
     if (ioctl(vcpu->fd, KVM_GET_SREGS, &(vcpu->sregs)) < 0) {
         error("KVM_GET_SREGS");
     }

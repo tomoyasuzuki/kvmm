@@ -3,7 +3,6 @@
 #include <unistd.h>
 #include "type.h"
 #include "vcpu.h"
-#include "io.h"
 #include "interrupt.h"
 #include "lapic.h"
 #include "util.h"
@@ -23,9 +22,9 @@ struct blk {
     u8 dev_conotrl_regs;
 };
 
-void create_blk(struct blk *blk);
-void emulate_diskr(struct vcpu *vcpu, struct blk *blk);
-void emulate_diskw(struct vcpu *vcpu, struct blk *blk, struct io io);
-void update_blk_index(struct blk *blk);
-void emulate_disk_portw(struct vcpu *vcpu, struct blk *blk, struct io io);
-void emulate_disk_portr(struct vcpu *vcpu, struct blk *blk);
+void create_blk();
+void emulate_diskr(struct vcpu *vcpu);
+void emulate_diskw(struct vcpu *vcpu);
+void update_blk_index();
+void emulate_disk_portw(struct vcpu *vcpu);
+void emulate_disk_portr(struct vcpu *vcpu);
