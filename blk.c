@@ -12,3 +12,13 @@ void emulate_diskr(struct vcpu *vcpu, struct blk *blk) {
         data = 0;
     }
 }
+
+void emulate_diskw(struct vcpu *vcpu, 
+                   struct blk *blk, struct io io) {
+    for (int i = 0; i < io.count; i++) {
+        u32 val4 = *(u32*)((u32*)vcpu->kvm_run + io.data_offset);
+        blk->data[blk->index] = val4;
+        vcpu->kvm_run->io.data_offset += io.size;
+        blk->index += io.size;
+    }
+}

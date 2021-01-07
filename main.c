@@ -13,6 +13,7 @@
 #include "type.h"
 #include "vcpu.h"
 #include "blk.h"
+#include "io.h"
 
 #define GUEST_PATH "../xv6/xv6.img"
 #define START_ADDRESS 0x7c00
@@ -55,13 +56,13 @@ struct vm {
 //     u8 dev_conotrl_regs;
 // };
 
-struct io {
-    __u8 direction;
-    __u8 size;
-    __u16 port;
-    __u32 count;
-    __u64 data_offset; 
-};
+// struct io {
+//     __u8 direction;
+//     __u8 size;
+//     __u16 port;
+//     __u32 count;
+//     __u64 data_offset; 
+// };
 
 struct mmio {
     __u64 phys_addr;
@@ -386,16 +387,6 @@ void create_output_file() {
 //         data = 0;
 //     }
 // }
-
-void emulate_diskw(struct vcpu *vcpu, 
-                   struct blk *blk, struct io io) {
-    for (int i = 0; i < io.count; i++) {
-        u32 val4 = *(u32*)((u32*)vcpu->kvm_run + io.data_offset);
-        blk->data[blk->index] = val4;
-        vcpu->kvm_run->io.data_offset += io.size;
-        blk->index += io.size;
-    }
-}
 
 void update_blk_index(struct blk *blk) {
     u32 index = 0 | blk->lba_low_reg | (blk->lba_middle_reg << 8) | (blk->lba_high_reg << 16);

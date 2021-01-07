@@ -1,5 +1,6 @@
 #include "type.h"
 #include "vcpu.h"
+#include "io.h"
 
 struct blk {
     u8 *data;
@@ -15,3 +16,4 @@ struct blk {
 };
 
 void emulate_diskr(struct vcpu *vcpu, struct blk *blk);
+void emulate_diskw(struct vcpu *vcpu, struct blk *blk, struct io io);
