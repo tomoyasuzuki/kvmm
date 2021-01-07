@@ -1,7 +1,7 @@
 COMPILER = gcc
 TARGET = kvmm
 CFLAGS = -pthread
-OBJECTS = main.o util.o
+OBJECTS = main.o util.o blk.o
 
 all: 
 	make $(TARGET)

@@ -10,6 +10,9 @@
 #include <linux/kvm.h>
 #include <pthread.h>
 #include "util.h"
+#include "type.h"
+#include "vcpu.h"
+#include "blk.h"
 
 #define GUEST_PATH "../xv6/xv6.img"
 #define START_ADDRESS 0x7c00
@@ -24,10 +27,6 @@
 #define IOAPIC_REDRTB_BASE (IOAPIC_BASE + 0x10)
 #define IRQ_BASE 32
 
-typedef uint8_t u8;
-typedef uint8_t u16;
-typedef uint32_t u32;
-typedef uint64_t u64;
 typedef struct kvm_userspace_memory_region kvm_mem;
 
 struct vm {
@@ -36,25 +35,25 @@ struct vm {
     void *mem;
 };
 
-struct vcpu {
-    int fd;
-    struct kvm_run *kvm_run;
-    struct kvm_sregs sregs;
-    struct kvm_regs regs;
-};
+// struct vcpu {
+//     int fd;
+//     struct kvm_run *kvm_run;
+//     struct kvm_sregs sregs;
+//     struct kvm_regs regs;
+// };
 
-struct blk {
-    u8 *data;
-    u16 data_reg;
-    u8 sec_count_reg;
-    u8 lba_low_reg;
-    u8 lba_middle_reg;
-    u8 lba_high_reg;
-    u8 drive_head_reg;
-    u8 status_command_reg;
-    u32 index;
-    u8 dev_conotrl_regs;
-};
+// struct blk {
+//     u8 *data;
+//     u16 data_reg;
+//     u8 sec_count_reg;
+//     u8 lba_low_reg;
+//     u8 lba_middle_reg;
+//     u8 lba_high_reg;
+//     u8 drive_head_reg;
+//     u8 status_command_reg;
+//     u32 index;
+//     u8 dev_conotrl_regs;
+// };
 
 struct io {
     __u8 direction;
@@ -375,18 +374,18 @@ void create_output_file() {
     outfd = open("out.txt", O_RDWR | O_CREAT);
 }
 
-void emulate_diskr(struct vcpu *vcpu, struct blk *blk) {
-    u32 data = 0;
-    for (int i = 0; i < vcpu->kvm_run->io.count; ++i) {
-        for (int j = 0; j < 4; j++) {
-            data |= blk->data[blk->index] << (8 * j);
-            blk->index += 1;
-        }
-        *(u32*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset) = data;
-        vcpu->kvm_run->io.data_offset += vcpu->kvm_run->io.size;
-        data = 0;
-    }
-}
+// void emulate_diskr(struct vcpu *vcpu, struct blk *blk) {
+//     u32 data = 0;
+//     for (int i = 0; i < vcpu->kvm_run->io.count; ++i) {
+//         for (int j = 0; j < 4; j++) {
+//             data |= blk->data[blk->index] << (8 * j);
+//             blk->index += 1;
+//         }
+//         *(u32*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset) = data;
+//         vcpu->kvm_run->io.data_offset += vcpu->kvm_run->io.size;
+//         data = 0;
+//     }
+// }
 
 void emulate_diskw(struct vcpu *vcpu, 
                    struct blk *blk, struct io io) {
@@ -701,8 +700,6 @@ int main(int argc, char **argv) {
         case KVM_EXIT_IRQ_WINDOW_OPEN:
             if (lapic->irr->buff[0] >= 32) {
                 inject_interrupt(vcpu->fd, lapic->irr->buff[0]);
-                printf("inject %d\n", lapic->irr->buff[0]);
-                printf("irrcount: %d\n", irr_count);
                 deq_irr(lapic->irr);
                 vcpu->kvm_run->request_interrupt_window = 0;
             }
