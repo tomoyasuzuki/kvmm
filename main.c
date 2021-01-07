@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <linux/kvm.h>
 #include <pthread.h>
+#include "util.h"
 
 #define GUEST_PATH "../xv6/xv6.img"
 #define START_ADDRESS 0x7c00
@@ -150,10 +151,10 @@ int deq_irr(struct irr_queue *irr) {
     }
 }   
 
-void error(char *message) {
-    perror(message);
-    exit(1);
-}
+// void error(char *message) {
+//     perror(message);
+//     exit(1);
+// }
 
 struct interrupt_buffer *init_irr_buff() {
     struct interrupt_buffer *irr_buff = malloc(sizeof(struct interrupt_buffer));
@@ -690,16 +691,8 @@ int main(int argc, char **argv) {
 
         struct kvm_run *run = vcpu->kvm_run;
 
-        // if (input != NULL) {
-        //     write(outfd, input, 1);
-        //     uart->data_reg = *input;
-        //     enq_irr(lapic->irr, IRQ_BASE+4);
-        //     run->request_interrupt_window = 1;
-        // }
-
         switch (run->exit_reason) {
         case KVM_EXIT_IO:
-            //print_regs(vcpu);
             emulate_io(vcpu, blk, uart);
             break;
         case KVM_EXIT_MMIO:
@@ -707,11 +700,7 @@ int main(int argc, char **argv) {
             break;
         case KVM_EXIT_IRQ_WINDOW_OPEN:
             if (lapic->irr->buff[0] >= 32) {
-                if (flag == 1) {
-                    inject_interrupt(vcpu->fd, IRQ_BASE+4);
-                } else {
-                    inject_interrupt(vcpu->fd, lapic->irr->buff[0]);
-                }
+                inject_interrupt(vcpu->fd, lapic->irr->buff[0]);
                 printf("inject %d\n", lapic->irr->buff[0]);
                 printf("irrcount: %d\n", irr_count);
                 deq_irr(lapic->irr);
