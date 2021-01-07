@@ -27,3 +27,28 @@ void load_guest_binary(void *dst) {
         tmp += size;
     }
 }
+
+void memalign(void **dst, size_t size, size_t align) {
+    if (posix_memalign(dst, size, align) < 0) {
+        printf("memalign: faile\n");
+        exit(1);
+    }
+}
+
+void set_vm_mem(struct vm *vm, 
+                kvm_mem *memreg,
+                u64 phys_start,
+                size_t size) {
+
+    memalign(&(vm->mem), size, ALIGNMENT_SIZE);
+
+    memreg->slot = 0;
+	memreg->flags = 0;
+	memreg->guest_phys_addr = phys_start;
+	memreg->memory_size = (u64)size;
+	memreg->userspace_addr = (unsigned long)vm->mem;
+    
+    if (ioctl(vm->fd, KVM_SET_USER_MEMORY_REGION, memreg) < 0) {
+		error("KVM_SET_USER_MEMORY_REGION");
+	}
+}
