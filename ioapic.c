@@ -1,6 +1,8 @@
 #include "ioapic.h"
 
-void emulate_ioapicw(struct vcpu *vcpu, struct ioapic *ioapic) {
+struct ioapic *ioapic;
+
+void emulate_ioapicw(struct vcpu *vcpu) {
     int offset = vcpu->kvm_run->mmio.phys_addr - IOAPIC_BASE;
     int i;
 

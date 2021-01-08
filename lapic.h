@@ -12,4 +12,4 @@ struct lapic {
     struct irr_queue *irr;
 };
 
-void emulate_lapicw(struct vcpu *vcpu, struct lapic *lapic);
+void emulate_lapicw(struct vcpu *vcpu);

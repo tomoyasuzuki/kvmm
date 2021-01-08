@@ -33,4 +33,4 @@ struct ioapic {
 #define IOAPIC_BASE 0xfec00000
 #define IOAPIC_REDRTB_BASE (IOAPIC_BASE + 0x10)
 
-void emulate_ioapicw(struct vcpu *vcpu, struct ioapic *ioapic);
+void emulate_ioapicw(struct vcpu *vcpu);

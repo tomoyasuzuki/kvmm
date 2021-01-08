@@ -1,6 +1,8 @@
 #include "lapic.h"
 
-void emulate_lapicw(struct vcpu *vcpu, struct lapic *lapic) {
+struct lapic *lapic;
+
+void emulate_lapicw(struct vcpu *vcpu) {
     int index = vcpu->kvm_run->mmio.phys_addr - LAPIC_BASE;
     u32 data = 0;
 
