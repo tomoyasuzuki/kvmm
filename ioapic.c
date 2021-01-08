@@ -2,6 +2,10 @@
 
 struct ioapic *ioapic;
 
+void init_ioapic() {
+    ioapic = malloc(sizeof(struct ioapic));
+}
+
 void emulate_ioapicw(struct vcpu *vcpu) {
     int offset = vcpu->kvm_run->mmio.phys_addr - IOAPIC_BASE;
     int i;
