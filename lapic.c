@@ -27,9 +27,7 @@ void emulate_interrupt(struct vcpu *vcpu) {
 
         switch (irq) {
         case IRQ_BASE+4:
-            set_uart_data_reg(); // set buff[0] value in data register
             inject_interrupt(vcpu->fd, irq);
-            clear_uart_data_reg(); // clear data register and remove buff[0] value
             break;
         case IRQ_BASE+14:
             inject_interrupt(vcpu->fd, irq);
@@ -39,7 +37,7 @@ void emulate_interrupt(struct vcpu *vcpu) {
             break;
         }
 
-        printf("inject: %d, count: %d\n", irq, lapic->irr->last);
+        //printf("inject: %d, count: %d\n", irq, lapic->irr->last);
     }
 
     vcpu->kvm_run->request_interrupt_window = 0;

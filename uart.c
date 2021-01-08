@@ -21,16 +21,15 @@ void create_uart() {
 
 void set_uart_data_reg() {
     uart->data_reg = uart->buff[0];
-    printf("set %c\n", (char)uart->data_reg);
 }
 
 void clear_uart_data_reg() {
     uart->data_reg = 0;
-    for (int i = 0; i < uart->buff_index; i++) {
+    for (int i = 0; i < uart->buff_index; i++)
         uart->buff[i] = uart->buff[i+1];
-    }
 
-    uart->buff_index--;
+    if (uart->buff_index > 0) 
+        uart->buff_index--;
 }
 
 void set_uart_lock() {
@@ -53,7 +52,7 @@ void emulate_uart_portw(struct vcpu *vcpu, int port, int count, int size) {
             char *v = (char*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
             printf("%c", *v);
             write(outfd, v, 1);
-            uart->data_reg = *v;
+            //uart->data_reg = *v;
             vcpu->kvm_run->io.data_offset += size;
         }
         break;
@@ -70,11 +69,15 @@ void emulate_uart_portw(struct vcpu *vcpu, int port, int count, int size) {
 }
 
 void emulate_uart_portr(struct vcpu *vcpu, int port) {
-    switch (port)
-    {
+    switch (port) {
     case 0x3f8:
+        set_uart_data_reg();
+
         *(unsigned char*)((unsigned char*)vcpu->kvm_run
-         + vcpu->kvm_run->io.data_offset) = uart->data_reg; 
+         + vcpu->kvm_run->io.data_offset) = (unsigned char)uart->data_reg;
+        
+        // clear data register
+        clear_uart_data_reg();
         break;
     case 0x3fd:
         *(unsigned char*)((unsigned char*)vcpu->kvm_run
