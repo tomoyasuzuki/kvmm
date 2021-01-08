@@ -1,6 +1,9 @@
 #include "lapic.h"
 
+#define MAX_IRR_COUNT 10
+
 struct lapic *lapic;
+
 
 void init_lapic() {
     lapic = malloc(sizeof(struct lapic));
@@ -19,11 +22,8 @@ void emulate_interrupt(struct vcpu *vcpu) {
         irq = lapic->irr->buff[i];
         if (!irq_is_valid(irq)) {
             deq_irr();
-            printf("continue\n");
             continue;
         }
-
-        printf("inject: %d, count: %d\n", irq, lapic->irr->last);
 
         switch (irq) {
         case IRQ_BASE+4:
@@ -33,18 +33,25 @@ void emulate_interrupt(struct vcpu *vcpu) {
             break;
         case IRQ_BASE+14:
             inject_interrupt(vcpu->fd, irq);
+            break;
         default:
+            continue;
             break;
         }
+
+        printf("inject: %d, count: %d\n", irq, lapic->irr->last);
     }
 
     vcpu->kvm_run->request_interrupt_window = 0;
 }
 
 void enq_irr(struct vcpu *vcpu, int value) {
-    if (!lapic->lock && (lapic->irr->last <= 5)) {
+    if (!lapic->lock) {
         lapic->irr->buff[lapic->irr->last] = value;
         lapic->irr->last++;
+    }
+
+    if (lapic->irr->last >= MAX_IRR_COUNT-1) {
         lapic->lock = 1;
     }
 
@@ -58,7 +65,10 @@ int deq_irr() {
    }
 
    lapic->irr->last--;
-   lapic->lock = 0;
+   
+   if (lapic->irr->last < MAX_IRR_COUNT-1) {
+       lapic->lock = 0;
+   }
 }  
 
 void inject_interrupt(int vcpufd, int irq) {

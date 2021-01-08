@@ -21,6 +21,7 @@ void create_uart() {
 
 void set_uart_data_reg() {
     uart->data_reg = uart->buff[0];
+    printf("set %c\n", (char)uart->data_reg);
 }
 
 void clear_uart_data_reg() {
