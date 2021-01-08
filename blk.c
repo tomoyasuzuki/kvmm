@@ -107,8 +107,7 @@ void emulate_disk_portw(struct vcpu *vcpu) {
     update_blk_index();
 
     if ((vcpu->kvm_run->io.port == 0x1F0 || vcpu->kvm_run->io.port == 0x1F7) && blk->dev_conotrl_regs == 0) {
-        enq_irr(lapic->irr,IRQ_BASE+14);
-        vcpu->kvm_run->request_interrupt_window = 1;
+        enq_irr(vcpu, IRQ_BASE+14);
     }
 }
 

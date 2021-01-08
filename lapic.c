@@ -5,36 +5,70 @@ struct lapic *lapic;
 void init_lapic() {
     lapic = malloc(sizeof(struct lapic));
     lapic->irr = malloc(4096);
+    lapic->lock = 0;
+}
+
+int irq_is_valid(int v) {
+    return v >= 32;
 }
 
 void emulate_interrupt(struct vcpu *vcpu) {
-    if (lapic->irr->buff[0] >= 32) {
-        inject_interrupt(vcpu->fd, lapic->irr->buff[0]);
-        deq_irr(lapic->irr);
-        vcpu->kvm_run->request_interrupt_window = 0;
+    int irq;
+
+    for (int i = 0; i < lapic->irr->last; i++) {
+        irq = lapic->irr->buff[i];
+        if (!irq_is_valid(irq)) {
+            deq_irr();
+            printf("continue\n");
+            continue;
+        }
+
+        printf("inject: %d, count: %d\n", irq, lapic->irr->last);
+
+        switch (irq) {
+        case IRQ_BASE+4:
+            set_uart_data_reg(); // set buff[0] value in data register
+            inject_interrupt(vcpu->fd, irq);
+            clear_uart_data_reg(); // clear data register and remove buff[0] value
+            break;
+        case IRQ_BASE+14:
+            inject_interrupt(vcpu->fd, irq);
+        default:
+            break;
+        }
     }
+
+    vcpu->kvm_run->request_interrupt_window = 0;
 }
 
-void enq_irr(struct irr_queue *irr, int value) {
-    irr->buff[irr->last] = value;
-    irr->last++;
+void enq_irr(struct vcpu *vcpu, int value) {
+    if (!lapic->lock && (lapic->irr->last <= 5)) {
+        lapic->irr->buff[lapic->irr->last] = value;
+        lapic->irr->last++;
+        lapic->lock = 1;
+    }
+
+    vcpu->kvm_run->request_interrupt_window = 1;
 }
 
-int deq_irr(struct irr_queue *irr) {
-   int out = irr->buff[0];
-   for (int i = 0; i <= irr->last; i++) {
-       irr->buff[i] = irr->buff[i+1];
+int deq_irr() {
+   int out = lapic->irr->buff[0];
+   for (int i = 0; i < lapic->irr->last; i++) {
+       lapic->irr->buff[i] = lapic->irr->buff[i+1];
    }
-   irr->last--;
+
+   lapic->irr->last--;
+   lapic->lock = 0;
 }  
 
 void inject_interrupt(int vcpufd, int irq) {
     struct kvm_interrupt *intr = malloc(sizeof(struct kvm_interrupt));
     intr->irq = irq;
     
-    
     if (ioctl(vcpufd, KVM_INTERRUPT, intr) < 0)
         error("KVM_INTERRUPT");
+    
+    deq_irr();
 }
 
 void emulate_lapicw(struct vcpu *vcpu) {

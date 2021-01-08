@@ -21,7 +21,6 @@
 #include "vm.h"
 
 struct vm *vm;
-int irr_count = 0;
 int outfd = 0;
 
 void init_kvm(struct vm *vm) {
@@ -35,10 +34,17 @@ void create_output_file() {
     outfd = open("out.txt", O_RDWR | O_CREAT);
 }
 
+struct subthread_input {
+    char *in;
+    struct vcpu *vcpu;
+};
+
 void *observe_input(void *in) {
     for (;;) {
-        int size = read(STDIN_FILENO, in, 1);
-        // uart->data_reg = *(char*)in;
+        struct subthread_input *subin = (struct subthread_input*)in;
+        int c = getchar();
+        set_uart_buff((char)c);
+        enq_irr(subin->vcpu, IRQ_BASE+4);
     }
 }
 
@@ -63,9 +69,12 @@ int main(int argc, char **argv) {
     create_output_file();
 
     pthread_t thread;
-    char input[100];
+    struct subthread_input subin;
+    char *usrinput = malloc(100);
+    subin.in = usrinput;
+    subin.vcpu = vcpu;
 
-    if (pthread_create(&thread, NULL, observe_input, input) != 0) {
+    if (pthread_create(&thread, NULL, observe_input, (void*)&subin) != 0) {
         error("pthread_create");
     }
 
