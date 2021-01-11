@@ -9,7 +9,7 @@ The goal of kvmm is to run xv6.
 - [x] disk emulation (partially)
 - [x] uart emulation (partially)
 - [x] ide interrupts (partially)
-- [ ] uart interrupts
+- [x] uart interrupts
 - [ ] keyboard interrupts
 - [ ] timer
 - [ ] multiproccessor support 
