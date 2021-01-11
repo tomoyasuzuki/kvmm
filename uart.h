@@ -17,7 +17,7 @@ struct uart {
     u8 modem_status_reg;
     u8 scratch_reg;
     int lock;
-    int buff_index;
+    int buff_count;
     char *buff;
 };
 

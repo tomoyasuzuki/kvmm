@@ -15,7 +15,7 @@ void create_uart() {
     uart->modem_status_reg = 0;
     uart->scratch_reg = 0;
     uart->lock = 0;
-    uart->buff_index = 0;
+    uart->buff_count = 0;
     uart->buff = malloc(10);
 }
 
@@ -25,11 +25,11 @@ void set_uart_data_reg() {
 
 void clear_uart_data_reg() {
     uart->data_reg = 0;
-    for (int i = 0; i < uart->buff_index; i++)
+    for (int i = 0; i < uart->buff_count; i++)
         uart->buff[i] = uart->buff[i+1];
 
-    if (uart->buff_index > 0) 
-        uart->buff_index--;
+    if (uart->buff_count > 0) 
+        uart->buff_count--;
 }
 
 void set_uart_lock() {
@@ -41,8 +41,9 @@ void set_uart_unlock() {
 }
 
 void set_uart_buff(char value) {
-    uart->buff[uart->buff_index] = value;
-    uart->buff_index++;
+    uart->buff[uart->buff_count] = value;
+    uart->buff_count++;
+    uart->line_status_reg |= (1<<0); // set data ready bit
 }
 
 void emulate_uart_portw(struct vcpu *vcpu, int port, int count, int size) {
@@ -50,7 +51,7 @@ void emulate_uart_portw(struct vcpu *vcpu, int port, int count, int size) {
     case 0x3f8:
         for (int i = 0; i < count; i++) {
             char *v = (char*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
-            printf("%c", *v);
+            putchar((int)*v);
             write(outfd, v, 1);
             //uart->data_reg = *v;
             vcpu->kvm_run->io.data_offset += size;
@@ -58,9 +59,6 @@ void emulate_uart_portw(struct vcpu *vcpu, int port, int count, int size) {
         break;
     case 0x3f9:
         uart->irr_enable_reg = *(u8*)((u8*)vcpu->kvm_run
-         + vcpu->kvm_run->io.data_offset);
-    case 0x3fd:
-        uart->line_status_reg = *(u8*)((u8*)vcpu->kvm_run
          + vcpu->kvm_run->io.data_offset);
         break;
     default:
@@ -76,8 +74,16 @@ void emulate_uart_portr(struct vcpu *vcpu, int port) {
         *(unsigned char*)((unsigned char*)vcpu->kvm_run
          + vcpu->kvm_run->io.data_offset) = (unsigned char)uart->data_reg;
         
-        // clear data register
+        // clear data register, update FIFO
         clear_uart_data_reg();
+
+        if (uart->buff_count == 0) {
+            // unset data ready bit
+            uart->line_status_reg &= ~(1<<0);
+        } else {
+            // set data ready bit
+            uart->line_status_reg |= (1<<0);
+        }
         break;
     case 0x3fd:
         *(unsigned char*)((unsigned char*)vcpu->kvm_run

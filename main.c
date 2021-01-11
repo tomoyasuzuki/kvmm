@@ -39,12 +39,16 @@ struct subthread_input {
     struct vcpu *vcpu;
 };
 
+int co = 0;
+
 void *observe_input(void *in) {
     for (;;) {
         struct subthread_input *subin = (struct subthread_input*)in;
         int c = getchar();
         set_uart_buff((char)c);
+        printf("set: %d\n", co);
         enq_irr(subin->vcpu, IRQ_BASE+4);
+        co++;
     }
 }
 
