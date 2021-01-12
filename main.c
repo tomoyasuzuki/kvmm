@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <linux/kvm.h>
 #include <pthread.h>
+#include <termios.h>
 #include "util.h"
 #include "type.h"
 #include "vcpu.h"
@@ -20,7 +21,6 @@
 #include "uart.h"
 #include "vm.h"
 
-struct vm *vm;
 int outfd = 0;
 
 void init_kvm(struct vm *vm) {
@@ -51,9 +51,20 @@ void *observe_input(void *in) {
 extern struct vcpu *vcpu;
 
 int main(int argc, char **argv) {
-    vm = malloc(sizeof(struct vm));
-
+    struct vm *vm = malloc(sizeof(struct vm));
     kvm_mem *memreg = malloc(sizeof(kvm_mem));
+
+    struct termios *tos = malloc(sizeof(struct termios));
+
+    if (tcgetattr(STDIN_FILENO, tos) < 0) {
+        error("get failed\n");
+    }
+
+    tos->c_lflag &= ~(ECHO);
+
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, tos) < 0) {
+        error("set failed\n");
+    }
 
     init_kvm(vm);
     create_vm(vm);
