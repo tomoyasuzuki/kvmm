@@ -34,16 +34,17 @@ void create_output_file() {
     outfd = open("out.txt", O_RDWR | O_CREAT);
 }
 
-struct subthread_input {
+struct input {
     char *in;
     struct vcpu *vcpu;
 };
 
 void *observe_input(void *in) {
-    for (;;) {
-        struct subthread_input *subin = (struct subthread_input*)in;
-        int c = getchar();
-        set_uart_buff((char)c);
+    int c = 0;
+    struct input *subin = (struct input*)in;
+
+    while(1) {
+        set_uart_buff((char)getchar());
         enq_irr(subin->vcpu, IRQ_BASE+4);
     }
 }
@@ -53,7 +54,6 @@ extern struct vcpu *vcpu;
 int main(int argc, char **argv) {
     struct vm *vm = malloc(sizeof(struct vm));
     kvm_mem *memreg = malloc(sizeof(kvm_mem));
-
     struct termios *tos = malloc(sizeof(struct termios));
 
     if (tcgetattr(STDIN_FILENO, tos) < 0) {
@@ -80,20 +80,20 @@ int main(int argc, char **argv) {
     create_output_file();
 
     pthread_t thread;
-    struct subthread_input subin;
+    struct input subin;
     char *usrinput = malloc(100);
     subin.in = usrinput;
     subin.vcpu = vcpu;
 
     if (pthread_create(&thread, NULL, observe_input, (void*)&subin) != 0) {
         error("pthread_create");
-    }
+    } 
 
     for (;;) {
         if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
             print_regs(vcpu);
             error("KVM_RUN");
-        }
+        }  
 
         struct kvm_run *run = vcpu->kvm_run;
 
