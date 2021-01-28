@@ -51,10 +51,10 @@ void emulate_uart_portw(struct vcpu *vcpu, int port, int count, int size) {
     case 0x3f8:
         for (int i = 0; i < count; i++) {
             char *v = (char*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
-            putchar((int)*v);
+            //putchar((int)*v);
+            printf("\033[32m%c", *v);
             fflush(stdout);
-            write(outfd, v, 1);
-            //uart->data_reg = *v;
+            uart->data_reg = *v;
             vcpu->kvm_run->io.data_offset += size;
         }
         break;
@@ -71,6 +71,8 @@ void emulate_uart_portr(struct vcpu *vcpu, int port) {
     switch (port) {
     case 0x3f8:
         set_uart_data_reg();
+
+        //printf("read %d\n", uart->data_reg);
 
         *(unsigned char*)((unsigned char*)vcpu->kvm_run
          + vcpu->kvm_run->io.data_offset) = (unsigned char)uart->data_reg;
@@ -92,5 +94,11 @@ void emulate_uart_portr(struct vcpu *vcpu, int port) {
         break;
     default:
         break;
+    }
+}
+
+void debug_buff() {
+    for (int i = 0; i < uart->buff_count; i++) {
+        printf("value: %d", uart->buff[i]);
     }
 }

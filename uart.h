@@ -29,3 +29,4 @@ void clear_uart_data_reg();
 void uart_lock();
 void uart_unlock();
 void set_uart_buff(char value);
+void debug_buff();
