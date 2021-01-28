@@ -1,7 +1,7 @@
 #include "uart.h"
 
 extern int outfd;
-
+int nodisplay = 1;
 struct uart *uart;
 
 void create_uart() {
@@ -51,9 +51,10 @@ void emulate_uart_portw(struct vcpu *vcpu, int port, int count, int size) {
     case 0x3f8:
         for (int i = 0; i < count; i++) {
             char *v = (char*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
-            //putchar((int)*v);
-            printf("\033[32m%c", *v);
-            fflush(stdout);
+            if (!nodisplay) {
+                putchar((int)*v);
+                fflush(stdout);
+            }
             uart->data_reg = *v;
             vcpu->kvm_run->io.data_offset += size;
         }
@@ -71,8 +72,6 @@ void emulate_uart_portr(struct vcpu *vcpu, int port) {
     switch (port) {
     case 0x3f8:
         set_uart_data_reg();
-
-        //printf("read %d\n", uart->data_reg);
 
         *(unsigned char*)((unsigned char*)vcpu->kvm_run
          + vcpu->kvm_run->io.data_offset) = (unsigned char)uart->data_reg;
