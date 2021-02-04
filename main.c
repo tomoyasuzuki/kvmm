@@ -63,6 +63,8 @@ void *observe_input(void *in) {
 //     }
 // }
 u32 get_target_addr(char *cm);
+void vm_loop(int *vm_status);
+void vm_run(int *vm_status);
 extern struct vcpu *vcpu;
 
 int main(int argc, char **argv) {
@@ -103,13 +105,14 @@ int main(int argc, char **argv) {
         memcpy(first, cm, 1);
         if (*first == 'b') {
             u32 addr = get_target_addr(cm);
-            printf("target: 0x%x\n", addr);
+            add_breakpoint(vcpu->fd, (u64)addr);
         } else if (*first == 'r') {
-            printf("setup r\n");
+            vm_status = 1;
+        } else if (*first == 'c') {
+            vm_status = 1;
         }
-        if (vm_status) {
-            vm_run();
-        }
+
+        vm_loop(&vm_status);
     }
    
     return 1;   
@@ -129,19 +132,7 @@ u32 get_target_addr(char *cm) {
     return addr;
 }
 
-void handle_command(char *cm) {
-    char b = 'b';
-    char r = 'r';
-    char *first = malloc(1);
-    memcpy(first, cm, 1);
-    if (*first == b) {
-        printf("setup b\n");
-    } else if (*first == r) {
-        printf("setup r\n");
-    }
-}
-
-void vm_run() {
+void vm_run(int *vm_status) {
     if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
         print_regs(vcpu);
         error("KVM_RUN");
@@ -161,9 +152,22 @@ void vm_run() {
         break;
     case KVM_EXIT_DEBUG:
         handle_debug(vcpu);
+        *vm_status = 0;
         break;
     default:
         printf("exit reason: %d\n", vcpu->kvm_run->exit_reason);
         break;
+
+    }
+}
+
+void vm_loop(int *vm_status) {
+    if (*vm_status == 0)
+        return;
+    
+    for(;;) {
+        if (*vm_status == 0)
+            break;
+        vm_run(vm_status);
     }
 }

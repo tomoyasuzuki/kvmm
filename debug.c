@@ -91,19 +91,23 @@ unsigned long long dr0;
 
  void clean_debug_reg(int fd) {
      debug->arch.debugreg[0] = 0;
+     debug->control &= ~(KVM_GUESTDBG_ENABLE);
+     debug->control &= ~(KVM_GUESTDBG_USE_HW_BP);
+
      update_debug_reg(fd, debug);
  }
 
  void add_breakpoint(int fd, u64 addr) {
      debug->arch.debugreg[0] = addr;
      update_debug_reg(fd, debug);
+     printf("Breakpoint: 0x%lx\n", addr);
  }
 
  void handle_debug(struct vcpu *vcpu) {
      if (ioctl(vcpu->fd, KVM_GET_REGS, &(vcpu->regs)) < 0)
         return;
 
-     printf("Breakpoint at 0x%llx\n", vcpu->regs.rip);
+     printf("Stop at 0x%llx\n", vcpu->regs.rip);
 
      clean_debug_reg(vcpu->fd);
  }
