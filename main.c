@@ -97,15 +97,16 @@ int main(int argc, char **argv) {
 
     for (;;) {
         printf("(kvmm) ");
-        scanf("%s", cm);
+        fflush(stdout);
+        read(STDIN_FILENO, cm, 20);
         char first[2];
         memcpy(first, cm, 1);
         if (*first == 'b') {
-            char target[20];
-            strncpy(target, cm, 5);
-            for (int i = 0; i < 4; i++) {
-                printf("%d\n", (int)(*(target+i)));
-            }
+            u32 addr;
+            char target[7];
+            trim_target(cm,target);
+            addr = (u32)strtol(target, NULL, 0);
+            printf("target: 0x%lx\n", addr);
         } else if (*first == 'r') {
             printf("setup r\n");
         }
@@ -115,6 +116,15 @@ int main(int argc, char **argv) {
     }
    
     return 1;   
+}
+
+void trim_target(char *cm, char *target) {
+    for (int i = 0; i < (int)(strlen(cm)); i++) {
+        if (cm[i] == ' ') {    
+            strncpy(target, cm+i+1, 6);
+            break;
+        }
+    }
 }
 
 void handle_command(char *cm) {
