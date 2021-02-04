@@ -62,7 +62,7 @@ void *observe_input(void *in) {
 //         }
 //     }
 // }
-
+u32 get_target_addr(char *cm);
 extern struct vcpu *vcpu;
 
 int main(int argc, char **argv) {
@@ -102,11 +102,8 @@ int main(int argc, char **argv) {
         char first[2];
         memcpy(first, cm, 1);
         if (*first == 'b') {
-            u32 addr;
-            char target[7];
-            trim_target(cm,target);
-            addr = (u32)strtol(target, NULL, 0);
-            printf("target: 0x%lx\n", addr);
+            u32 addr = get_target_addr(cm);
+            printf("target: 0x%x\n", addr);
         } else if (*first == 'r') {
             printf("setup r\n");
         }
@@ -118,13 +115,18 @@ int main(int argc, char **argv) {
     return 1;   
 }
 
-void trim_target(char *cm, char *target) {
+u32 get_target_addr(char *cm) {
+    char target[7];
+    u32 addr;
     for (int i = 0; i < (int)(strlen(cm)); i++) {
         if (cm[i] == ' ') {    
             strncpy(target, cm+i+1, 6);
+            addr = (u32)strtol(target, NULL, 0);
             break;
         }
     }
+
+    return addr;
 }
 
 void handle_command(char *cm) {
