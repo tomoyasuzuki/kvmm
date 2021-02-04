@@ -49,8 +49,11 @@ union dr6 {
 struct kvm_guest_debug *debug;
 union dr6 dr6;
 union dr7 dr7;
+unsigned long long dr0;
 
- void init_debug_registers(int fd, unsigned int address) {
+ void update_debug_reg(int fd, struct kvm_guest_debug *debug);
+
+ void init_debug_registers(int fd) {
     debug = malloc(sizeof(struct kvm_guest_debug));
     debug->control = 0;
     debug->pad = 0;
@@ -73,12 +76,34 @@ union dr7 dr7;
     dr6.bits.bd = 0;
     dr6.bits.bs = 0;
     dr6.bits.bt = 0;
-    unsigned long long dr0 = address; // break address
+    dr0 = 0x0; // break address
     debug->arch.debugreg[0] = (unsigned long long)dr0;
     debug->arch.debugreg[6] = (unsigned long long)dr6.control;
     debug->arch.debugreg[7] = (unsigned long long)dr7.control;
 
-    if (ioctl(fd, KVM_SET_GUEST_DEBUG, debug) < 0) {
+    update_debug_reg(fd, debug);
+ }
+
+ void update_debug_reg(int fd, struct kvm_guest_debug *debug) {
+     if (ioctl(fd, KVM_SET_GUEST_DEBUG, debug) < 0)
         error("KVM_SET_GUEST_DEBUG");
-    }
+ }
+
+ void clean_debug_reg(int fd) {
+     debug->arch.debugreg[0] = 0;
+     update_debug_reg(fd, debug);
+ }
+
+ void add_breakpoint(int fd, u64 addr) {
+     debug->arch.debugreg[0] = addr;
+     update_debug_reg(fd, debug);
+ }
+
+ void handle_debug(struct vcpu *vcpu) {
+     if (ioctl(vcpu->fd, KVM_GET_REGS, &(vcpu->regs)) < 0)
+        return;
+
+     printf("Breakpoint at 0x%llx\n", vcpu->regs.rip);
+
+     clean_debug_reg(vcpu->fd);
  }

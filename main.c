@@ -51,22 +51,23 @@ void *observe_input(void *in) {
     }
 }
 
+// void *handle_command(void *input) {
+//     for(;;) {
+//         char *b = 'b';
+//         char *ini_c;
+//         memcpy(ini_c, input, 1);
+//         if (*b == *ini_c) {
+//             printf("initial value is b\n");
+//             exit(1);
+//         }
+//     }
+// }
+
 extern struct vcpu *vcpu;
 
 int main(int argc, char **argv) {
     struct vm *vm = malloc(sizeof(struct vm));
     kvm_mem *memreg = malloc(sizeof(kvm_mem));
-    struct termios *tos = malloc(sizeof(struct termios));
-
-    // if (tcgetattr(STDIN_FILENO, tos) < 0) {
-    //     error("get failed\n");
-    // }
-
-    // tos->c_lflag &= ~(ECHO | ICANON);
-
-    // if (tcsetattr(STDIN_FILENO, TCSAFLUSH, tos) < 0) {
-    //     error("set failed\n");
-    // }
 
     init_kvm(vm);
     create_vm(vm);
@@ -80,51 +81,77 @@ int main(int argc, char **argv) {
     set_regs();
     create_uart();
     create_output_file();
+    init_debug_registers(vcpu->fd);
 
-    pthread_t thread;
-    struct input subin;
-    char *usrinput = malloc(100);
-    subin.in = usrinput;
-    subin.vcpu = vcpu;
+    // pthread_t thread;
+    // struct input subin;
+    // char *usrinput = malloc(100);
+    // subin.in = usrinput;
+    // subin.vcpu = vcpu;
 
-    if (pthread_create(&thread, NULL, observe_input, (void*)&subin) != 0) {
-        error("pthread_create");
-    }
-
-    // dr6: 0xffff0ff0
-    // dr7: 0x403
-    printf("(kvmm) ");
-    unsigned int input_address = 0;
-    scanf("%x", &input_address);
-    init_debug_registers(vcpu->fd, input_address);
+    // if (pthread_create(&thread, NULL, handle_command, (void*)usrinput) != 0) {
+    //     error("pthread_create");
+    // }
+    int vm_status = 0;
+    char cm[100];
 
     for (;;) {
-        if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
-            print_regs(vcpu);
-            error("KVM_RUN");
-        } 
-
-        struct kvm_run *run = vcpu->kvm_run;
-
-        switch (run->exit_reason) {
-        case KVM_EXIT_IO:
-            emulate_io(vcpu);
-            break;
-        case KVM_EXIT_MMIO:
-            emulate_mmio(vcpu);
-            break;
-        case KVM_EXIT_IRQ_WINDOW_OPEN:
-            emulate_interrupt(vcpu);
-            break;
-        case KVM_EXIT_DEBUG:
-            printf("DEBUG: ");
-            print_regs();
-            exit(1);
-            break;
-        default:
-            printf("exit reason: %d\n", vcpu->kvm_run->exit_reason);
-            break;
+        printf("(kvmm) ");
+        scanf("%s", cm);
+        char first[2];
+        memcpy(first, cm, 1);
+        if (*first == 'b') {
+            char target[20];
+            strncpy(target, cm, 5);
+            for (int i = 0; i < 4; i++) {
+                printf("%d\n", (int)(*(target+i)));
+            }
+        } else if (*first == 'r') {
+            printf("setup r\n");
+        }
+        if (vm_status) {
+            vm_run();
         }
     }
+   
     return 1;   
+}
+
+void handle_command(char *cm) {
+    char b = 'b';
+    char r = 'r';
+    char *first = malloc(1);
+    memcpy(first, cm, 1);
+    if (*first == b) {
+        printf("setup b\n");
+    } else if (*first == r) {
+        printf("setup r\n");
+    }
+}
+
+void vm_run() {
+    if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
+        print_regs(vcpu);
+        error("KVM_RUN");
+    } 
+
+    struct kvm_run *run = vcpu->kvm_run;
+
+    switch (run->exit_reason) {
+    case KVM_EXIT_IO:
+        emulate_io(vcpu);
+        break;
+    case KVM_EXIT_MMIO:
+        emulate_mmio(vcpu);
+        break;
+    case KVM_EXIT_IRQ_WINDOW_OPEN:
+        emulate_interrupt(vcpu);
+        break;
+    case KVM_EXIT_DEBUG:
+        handle_debug(vcpu);
+        break;
+    default:
+        printf("exit reason: %d\n", vcpu->kvm_run->exit_reason);
+        break;
+    }
 }
