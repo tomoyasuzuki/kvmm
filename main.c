@@ -44,19 +44,22 @@ typedef enum {
     Continue,
     Breakpoint,
     File,
+    Show,
     Unknown
 } CommandType;
+
+extern struct vcpu *vcpu;
 
 u32 get_target_addr(char *cm);
 void vm_loop(int *vm_status);
 void vm_run(int *vm_status);
 char *get_path(char *cm);
 void get_symbol_table(char *path);
-void handle_breakpoint(char *cm);
+void handle_breakpoint_cm(char *cm);
 void handle_command(char *cm, int *vm_status);
+void handle_show_cm(char *cm);
+void show_registers(struct vcpu *vcpu);
 CommandType parse_command(char *cm);
-
-extern struct vcpu *vcpu;
 
 int main(int argc, char **argv) {
     struct vm *vm = malloc(sizeof(struct vm));
@@ -90,12 +93,44 @@ int main(int argc, char **argv) {
     return 1;   
 }
 
+void handle_show_cm(char *cm) {
+    char target[30];
+    for (int i = 0; i < strlen(cm); i++) {
+        if (cm[i] == ' ') {
+            int target_length = (int)(strlen(cm+i+1));
+
+            strncpy(target, cm+i+1, target_length);
+
+            target[target_length-1] = '\0';
+
+            if (!strcmp(target, "registers")) {
+                show_registers(vcpu);
+            }
+        }
+    }
+}
+
+void show_registers(struct vcpu *vcpu) {
+    if (ioctl(vcpu->fd, KVM_GET_REGS, &(vcpu->regs)) < 0) {
+        error("Error");
+    }
+
+    printf("rax\t=\t0x%llx\nrbx\t=\t0x%llx\nrcx\t=\t0x%llx\nrdx\t=\t0x%llx\nrip\t=\t0x%llx\nrbp\t=\t0x%llx\nrflags\t=\t0x%llx\n", 
+            vcpu->regs.rax,
+            vcpu->regs.rbx,
+            vcpu->regs.rcx,
+            vcpu->regs.rdx,
+            vcpu->regs.rip,
+            vcpu->regs.rbp,
+            vcpu->regs.rflags);
+}
+
 void handle_command(char *cm, int *vm_status) {
     CommandType type = parse_command(cm);
 
     switch (type) {
     case Breakpoint:
-        handle_breakpoint(cm);
+        handle_breakpoint_cm(cm);
         break;
     case Run:
         *vm_status = 1;
@@ -106,13 +141,16 @@ void handle_command(char *cm, int *vm_status) {
     case File:
         get_symbol_table(get_path(cm));
         break;
+    case Show:
+        handle_show_cm(cm);
+        break;
     default:
         printf("Unknown commnad\n");
         break;
     }
 }
 
-void handle_breakpoint(char *cm) {
+void handle_breakpoint_cm(char *cm) {
     u32 addr;
     if ((addr = get_target_addr(cm)) == 0xffffffff) {
         printf("function not found\n");
@@ -146,6 +184,8 @@ CommandType parse_command(char *cm) {
     // handle multiple characters commnads.
     if (memcmp(com, "file", 4) == 0) {
         return File;
+    } else if (memcmp(com, "show", 4) == 0)  {
+        return Show;
     } else {
         return Unknown;
     }
