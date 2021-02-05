@@ -177,7 +177,8 @@ void get_symbol_table(char *path) {
     Elf32_Sym *sym_en;
 
     if ((file = fopen(path, "rb")) == NULL) {
-        error("OPEN ERROR");
+        perror("Error");
+        return;
     }
 
     fseek(file, 0, SEEK_END);
@@ -241,7 +242,7 @@ u32 get_target_addr(char *cm) {
             char prefix[3];
             strncpy(prefix, cm+i+1, 2);
             if (memcmp(prefix, "0x", 2) == 0) {
-                //expect address is in 0x0~0xffffffff
+                // expect address range in 0x0~0xffffffff
                 strncpy(target_addr, cm+i+1, 10); 
                 addr = (u32)strtol(target_addr, NULL, 0);
                 break;
@@ -252,11 +253,6 @@ u32 get_target_addr(char *cm) {
             strncpy(target_name, cm+i+1, name_length);
             // replace '\n' with '\0'
             target_name[name_length-1] = '\0';
-            // printf("name: ");
-            // for (int n = 0; n < name_length; n++) {
-            //     printf("%d ", (int)target_name[n]);
-            // }
-            // printf("\n");
             if ((addr = get_func_addr(target_name)) == 0xffffffff)
                 return 0xffffffff;
             break;
