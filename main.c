@@ -21,6 +21,7 @@
 #include "uart.h"
 #include "vm.h"
 #include "debug.h"
+#include <elf.h>
 
 int outfd = 0;
 
@@ -51,20 +52,12 @@ void *observe_input(void *in) {
     }
 }
 
-// void *handle_command(void *input) {
-//     for(;;) {
-//         char *b = 'b';
-//         char *ini_c;
-//         memcpy(ini_c, input, 1);
-//         if (*b == *ini_c) {
-//             printf("initial value is b\n");
-//             exit(1);
-//         }
-//     }
-// }
 u32 get_target_addr(char *cm);
 void vm_loop(int *vm_status);
 void vm_run(int *vm_status);
+char *get_path(char *cm);
+void get_symbol_table(char *path);
+
 extern struct vcpu *vcpu;
 
 int main(int argc, char **argv) {
@@ -110,12 +103,86 @@ int main(int argc, char **argv) {
             vm_status = 1;
         } else if (*first == 'c') {
             vm_status = 1;
+        } else if (*first == 'f') {
+            get_symbol_table(get_path(cm));
         }
 
         vm_loop(&vm_status);
     }
    
     return 1;   
+}
+
+char *get_path(char *cm) {
+    char *path = malloc(100);
+    int path_start;
+    int path_end = (int)(strlen(cm))-1;
+    for (int i = 0; i < path_end; i++) {
+        if (cm[i] == ' ') {
+            path_start = i+1;
+            break;
+        }
+    }
+
+    memcpy(path, cm+path_start, path_end-path_start-1);
+    path[path_end-path_start-1] = '\0';
+    return path;
+}
+
+void get_symbol_table(char *path) {
+    FILE *file = NULL;
+    size_t size = 0;
+    void *buff = malloc(200000);
+    char *sname = malloc(1000);
+    Elf32_Ehdr *ehdr;
+    Elf32_Shdr *shdr = malloc(200000);
+    Elf32_Shdr *sym = malloc(200000);
+    Elf32_Sym *sym_en = malloc(200000);
+    Elf32_Shdr *strtab = malloc(200000);
+    Elf32_Shdr *shstr = malloc(200000);
+
+    if ((file = fopen(path, "rb")) == NULL) {
+        error("OPEN ERROR");
+    }
+
+     fseek(file, 0, SEEK_END);
+     size = (size_t)ftell(file);
+     fseek(file, 0, SEEK_SET);
+     fread(buff, sizeof(char), size, file);
+
+    ehdr = (Elf32_Ehdr*)buff;
+
+    shstr = (Elf32_Shdr*)(buff + ehdr->e_shoff + ehdr->e_shentsize * ehdr->e_shstrndx);
+
+    for (int i = 0;i  < ehdr->e_shnum; i++) {
+        shdr = (Elf32_Shdr*)(buff + ehdr->e_shoff + ehdr->e_shentsize * i);
+        sname = (char*)(buff + shstr->sh_offset + shdr->sh_name);
+        if (!strcmp(sname, ".strtab"))
+            strtab = shdr;
+    }
+
+    if (ehdr->e_ident[0] != 0x7f | ehdr->e_ident[EI_CLASS] != ELFCLASS32) {
+        printf("Magic number or class is wrong\n");
+        exit(0);
+    }
+
+    for (int i = 0; i < ehdr->e_shnum; i++) {
+        shdr = (Elf32_Shdr*)(buff + ehdr->e_shoff + ehdr->e_shentsize * i);
+        if (shdr->sh_type != SHT_SYMTAB)
+            continue;
+
+        sym = shdr;
+        for (int j = 0; j < sym->sh_size / sym->sh_entsize; j++) {
+            sym_en = (Elf32_Sym*)(buff + sym->sh_offset + sym->sh_entsize * j);
+            if (!sym_en->st_name || sym->sh_type != STT_FUNC)
+                continue;
+            
+            printf("%s\n", (char*)(buff + strtab->sh_offset + sym_en->st_name));
+        }
+        break;
+    }
+
+    
 }
 
 u32 get_target_addr(char *cm) {
