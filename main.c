@@ -23,17 +23,11 @@
 #include "debug.h"
 #include <elf.h>
 
-int outfd = 0;
-
 void init_kvm(struct vm *vm) {
     vm->vm_fd = open("/dev/kvm", O_RDWR);
     if (vm->vm_fd < 0) { 
         error("open /dev/kvm");
     }
-}
-
-void create_output_file() {
-    outfd = open("out.txt", O_RDWR | O_CREAT);
 }
 
 struct input {
@@ -90,7 +84,6 @@ int main(int argc, char **argv) {
     create_output_file();
     init_debug_registers(vcpu->fd);
 
-    // pthread_t thread;CommnadType
     int vm_status = 0;
     char cm[100];
 
@@ -188,15 +181,7 @@ void get_symbol_table(char *path) {
 
     if ((file = fopen(path, "rb")) == NULL) {
         error("OPEN ERROR");
-    }
-
-     fseek(file, 0, SEEK_END);
-     size = (size_t)ftell(file);
-     fseek(file, 0, SEEK_SET);
-
-     buff = malloc(size);
-     fread(buff, sizeof(char), size, file);
-
+    }    // pthread_t thread;CommnadType
     ehdr = (Elf32_Ehdr*)buff;
     shstr = (Elf32_Shdr*)(buff + ehdr->e_shoff + ehdr->e_shentsize * ehdr->e_shstrndx);
 

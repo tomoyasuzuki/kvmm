@@ -5,3 +5,4 @@
 #include <stdlib.h>
 
 void error(char *msg);
+void create_output_file();
