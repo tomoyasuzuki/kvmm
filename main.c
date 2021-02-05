@@ -52,11 +52,23 @@ void *observe_input(void *in) {
     }
 }
 
+typedef enum {
+    Run,
+    Continue,
+    Breakpoint,
+    File,
+    Unknown
+} CommandType;
+
 u32 get_target_addr(char *cm);
 void vm_loop(int *vm_status);
 void vm_run(int *vm_status);
 char *get_path(char *cm);
 void get_symbol_table(char *path);
+void handle_breakpoint(char *cm);
+void handle_command(char *cm, int *vm_status);
+CommandType parse_command(char *cm);
+
 
 extern struct vcpu *vcpu;
 
@@ -78,15 +90,7 @@ int main(int argc, char **argv) {
     create_output_file();
     init_debug_registers(vcpu->fd);
 
-    // pthread_t thread;
-    // struct input subin;
-    // char *usrinput = malloc(100);
-    // subin.in = usrinput;
-    // subin.vcpu = vcpu;
-
-    // if (pthread_create(&thread, NULL, handle_command, (void*)usrinput) != 0) {
-    //     error("pthread_create");
-    // }
+    // pthread_t thread;CommnadType
     int vm_status = 0;
     char cm[100];
 
@@ -94,23 +98,67 @@ int main(int argc, char **argv) {
         printf("(kvmm) ");
         fflush(stdout);
         read(STDIN_FILENO, cm, 20);
-        char first[2];
-        memcpy(first, cm, 1);
-        if (*first == 'b') {
-            u32 addr = get_target_addr(cm);
-            add_breakpoint(vcpu->fd, (u64)addr);
-        } else if (*first == 'r') {
-            vm_status = 1;
-        } else if (*first == 'c') {
-            vm_status = 1;
-        } else if (*first == 'f') {
-            get_symbol_table(get_path(cm));
-        }
-
+        handle_command(cm, &vm_status);
         vm_loop(&vm_status);
     }
    
     return 1;   
+}
+
+void handle_command(char *cm, int *vm_status) {
+    CommandType type = parse_command(cm);
+
+    switch (type) {
+    case Breakpoint:
+        handle_breakpoint(cm);
+        break;
+    case Run:
+        *vm_status = 1;
+        break;
+    case Continue:
+        *vm_status = 1;
+        break;
+    case File:
+        get_symbol_table(get_path(cm));
+        break;
+    default:
+        printf("Unknown commnad\n");
+        break;
+    }
+}
+
+void handle_breakpoint(char *cm) {
+    u32 addr = get_target_addr(cm);
+    add_breakpoint(vcpu->fd, addr);
+}
+
+CommandType parse_command(char *cm) {
+    char com[20];
+    char first[2];
+
+    // handle a character commnads.
+    memcpy(first, cm, 1);
+    if (*first == 'b') {
+        return Breakpoint;
+    } else if (*first == 'r') {
+        return Run;
+    } else if (*first == 'c') {
+        return Continue;
+    }
+
+    for (int i = 0; i < (int)(strlen(cm)); i++) {
+        if (cm[i] == ' ') {
+            memcpy(com, cm, i);
+            break;
+        }
+    }
+
+    // handle multiple characters commnads.
+    if (memcmp(com, "file", 4) == 0) {
+        return File;
+    } else {
+        return Unknown;
+    }
 }
 
 char *get_path(char *cm) {
@@ -124,22 +172,19 @@ char *get_path(char *cm) {
         }
     }
 
-    memcpy(path, cm+path_start, path_end-path_start-1);
-    path[path_end-path_start-1] = '\0';
+    memcpy(path, cm+path_start, path_end-path_start);
+    path[path_end-path_start] = '\0';
     return path;
 }
 
 void get_symbol_table(char *path) {
     FILE *file = NULL;
     size_t size = 0;
-    void *buff = malloc(200000);
-    char *sname = malloc(1000);
+    void *buff;
+    char *sname;
     Elf32_Ehdr *ehdr;
-    Elf32_Shdr *shdr = malloc(200000);
-    Elf32_Shdr *sym = malloc(200000);
-    Elf32_Sym *sym_en = malloc(200000);
-    Elf32_Shdr *strtab = malloc(200000);
-    Elf32_Shdr *shstr = malloc(200000);
+    Elf32_Shdr *shdr, *shstr, *strtab, *sym;
+    Elf32_Sym *sym_en;
 
     if ((file = fopen(path, "rb")) == NULL) {
         error("OPEN ERROR");
@@ -148,10 +193,11 @@ void get_symbol_table(char *path) {
      fseek(file, 0, SEEK_END);
      size = (size_t)ftell(file);
      fseek(file, 0, SEEK_SET);
+
+     buff = malloc(size);
      fread(buff, sizeof(char), size, file);
 
     ehdr = (Elf32_Ehdr*)buff;
-
     shstr = (Elf32_Shdr*)(buff + ehdr->e_shoff + ehdr->e_shentsize * ehdr->e_shstrndx);
 
     for (int i = 0;i  < ehdr->e_shnum; i++) {
@@ -161,9 +207,14 @@ void get_symbol_table(char *path) {
             strtab = shdr;
     }
 
-    if (ehdr->e_ident[0] != 0x7f | ehdr->e_ident[EI_CLASS] != ELFCLASS32) {
-        printf("Magic number or class is wrong\n");
-        exit(0);
+    if (ehdr->e_ident[0] != 0x7f) {
+        printf("Error: ELF magic number is wrong\n");
+        return;
+    }
+
+    if ( ehdr->e_ident[EI_CLASS] != ELFCLASS32) {
+        printf("Error: kvmm can only accept 32bit Elf file\n");
+        return;
     }
 
     for (int i = 0; i < ehdr->e_shnum; i++) {
@@ -180,9 +231,7 @@ void get_symbol_table(char *path) {
             printf("%s\n", (char*)(buff + strtab->sh_offset + sym_en->st_name));
         }
         break;
-    }
-
-    
+    }    
 }
 
 u32 get_target_addr(char *cm) {
