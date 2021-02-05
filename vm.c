@@ -1,5 +1,12 @@
 #include "vm.h"
 
+void init_kvm(struct vm *vm) {
+    vm->vm_fd = open("/dev/kvm", O_RDWR);
+    if (vm->vm_fd < 0) { 
+        error("open /dev/kvm");
+    }
+}
+
 void create_vm(struct vm *vm) {
     vm->fd = ioctl(vm->vm_fd, KVM_CREATE_VM, 0);
     if (vm->fd < 0) {

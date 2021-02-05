@@ -23,28 +23,21 @@
 #include "debug.h"
 #include <elf.h>
 
-void init_kvm(struct vm *vm) {
-    vm->vm_fd = open("/dev/kvm", O_RDWR);
-    if (vm->vm_fd < 0) { 
-        error("open /dev/kvm");
-    }
-}
+// void *observe_input(void *in) {
+//     int c = 0;
+//     struct input *subin = (struct input*)in;
 
-struct input {
-    char *in;
-    struct vcpu *vcpu;
-};
+//     while(1) {
+//         c = getchar();
+//         set_uart_buff((char)c);
+//         enq_irr(subin->vcpu, IRQ_BASE+4);
+//     }
+// }
 
-void *observe_input(void *in) {
-    int c = 0;
-    struct input *subin = (struct input*)in;
-
-    while(1) {
-        c = getchar();
-        set_uart_buff((char)c);
-        enq_irr(subin->vcpu, IRQ_BASE+4);
-    }
-}
+// struct input {
+//     char *in;
+//     struct vcpu *vcpu;
+// };
 
 typedef enum {
     Run,
@@ -62,7 +55,6 @@ void get_symbol_table(char *path);
 void handle_breakpoint(char *cm);
 void handle_command(char *cm, int *vm_status);
 CommandType parse_command(char *cm);
-
 
 extern struct vcpu *vcpu;
 
@@ -90,7 +82,7 @@ int main(int argc, char **argv) {
     for (;;) {
         printf("(kvmm) ");
         fflush(stdout);
-        read(STDIN_FILENO, cm, 20);
+        fgets(cm, 20, stdin);
         handle_command(cm, &vm_status);
         vm_loop(&vm_status);
     }
@@ -121,12 +113,17 @@ void handle_command(char *cm, int *vm_status) {
 }
 
 void handle_breakpoint(char *cm) {
-    u32 addr = get_target_addr(cm);
+    u32 addr;
+    if ((addr = get_target_addr(cm)) == 0xffffffff) {
+        printf("function not found\n");
+        return;
+    }
+    
     add_breakpoint(vcpu->fd, addr);
 }
 
 CommandType parse_command(char *cm) {
-    char com[20];
+    char com[30];
     char first[2];
 
     // handle a character commnads.
@@ -181,7 +178,15 @@ void get_symbol_table(char *path) {
 
     if ((file = fopen(path, "rb")) == NULL) {
         error("OPEN ERROR");
-    }    // pthread_t thread;CommnadType
+    }
+
+    fseek(file, 0, SEEK_END);
+    size = (size_t)(ftell(file));
+    fseek(file, 0, SEEK_SET);
+
+    buff = malloc(size);
+    fread(buff, 1, size, file);
+
     ehdr = (Elf32_Ehdr*)buff;
     shstr = (Elf32_Shdr*)(buff + ehdr->e_shoff + ehdr->e_shentsize * ehdr->e_shstrndx);
 
@@ -208,24 +213,52 @@ void get_symbol_table(char *path) {
             continue;
 
         sym = shdr;
+        int sym_func_index = 0;
         for (int j = 0; j < sym->sh_size / sym->sh_entsize; j++) {
             sym_en = (Elf32_Sym*)(buff + sym->sh_offset + sym->sh_entsize * j);
             if (!sym_en->st_name || sym->sh_type != STT_FUNC)
                 continue;
-            
-            printf("%s\n", (char*)(buff + strtab->sh_offset + sym_en->st_name));
+
+            if (sym_func_index == 0)
+                register_symtable_num(sym->sh_size / sym->sh_entsize);
+        
+            register_sym_en(sym_en->st_value, 
+                            (char*)(buff + strtab->sh_offset + sym_en->st_name), sym_func_index);
+            sym_func_index++;
         }
         break;
-    }    
+    }
+
+    free(buff);
 }
 
 u32 get_target_addr(char *cm) {
-    char target[7];
+    char target_addr[10];
+    char target_name[100];
     u32 addr;
     for (int i = 0; i < (int)(strlen(cm)); i++) {
         if (cm[i] == ' ') {    
-            strncpy(target, cm+i+1, 6);
-            addr = (u32)strtol(target, NULL, 0);
+            char prefix[3];
+            strncpy(prefix, cm+i+1, 2);
+            if (memcmp(prefix, "0x", 2) == 0) {
+                //expect address is in 0x0~0xffffffff
+                strncpy(target_addr, cm+i+1, 10); 
+                addr = (u32)strtol(target_addr, NULL, 0);
+                break;
+            }
+            
+            int name_length = strlen(cm+i+1);
+            printf("length %d\n", name_length);
+            strncpy(target_name, cm+i+1, name_length);
+            // replace '\n' with '\0'
+            target_name[name_length-1] = '\0';
+            // printf("name: ");
+            // for (int n = 0; n < name_length; n++) {
+            //     printf("%d ", (int)target_name[n]);
+            // }
+            // printf("\n");
+            if ((addr = get_func_addr(target_name)) == 0xffffffff)
+                return 0xffffffff;
             break;
         }
     }

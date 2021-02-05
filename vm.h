@@ -25,6 +25,7 @@ struct vm {
     void *mem;
 };
 
+void init_kvm(struct vm *vm);
 void create_vm(struct vm *vm);
 void set_tss(int fd);
 void load_guest_binary(void *dst);

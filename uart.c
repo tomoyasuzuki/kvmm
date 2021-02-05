@@ -43,7 +43,7 @@ void emulate_uart_portw(struct vcpu *vcpu, int port, int count, int size) {
     case 0x3f8:
         for (int i = 0; i < count; i++) {
             char *v = (char*)((unsigned char*)vcpu->kvm_run + vcpu->kvm_run->io.data_offset);
-            write(outfd, 1, *v);
+            write(outfd, v, 1);
             uart->data_reg = *v;
             vcpu->kvm_run->io.data_offset += size;
         }
